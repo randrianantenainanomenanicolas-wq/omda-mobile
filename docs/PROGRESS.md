@@ -1,7 +1,13 @@
 # Avancement OMDA Mobile
-- Étape en cours : 2
-- Dernier test OK : `npx tsc --noEmit` (0 erreur) + `npx tailwindcss` (11 couleurs + 4 statuts générés) + `npx expo export --platform android` (bundle réussi, tokens présents) — 24/09/2026
+- Étape en cours : 3
+- Dernier test OK : `npx tsc --noEmit` (0 erreur) + `npx tailwindcss` (27 classes de tokens générées, 0 erreur) + `npx expo export --platform android` (bundle réussi, catalogue inclus) — 24/09/2026
 - Notes :
+  - Étape 3 = composants UI uniquement : 14 composants dans `src/components/ui` (+ barrel `index.ts`) et un écran catalogue `app/dev/catalogue.tsx` (route `/dev/catalogue`).
+  - Composants créés : `Button` (primary/secondary/destructive, désactivé, chargement, icône), `TextField` (libellé/aide/erreur + focus), `SelectField` (modal 48 px, liste vide gérée), `UploadTile` (vide / en cours / attente de vérification / confirmé / erreur, progression + « Réessayer »), `StatusPill` (success/pending/error/info), `StepTimeline` (fait / en cours / à venir / rejeté), `AmountCard` (+ utilitaire `formaterMontantAriary`), `InfoBanner` (4 variantes), `EmptyState`, `ErrorState` (message + « Réessayer »), `LoadingState`, `ScreenContainer`, `AppHeader` (retour 48 × 48 px) et `Icone` (wrapper FontAwesome tokenisé).
+  - Contraintes respectées : zones tactiles `min-h-12` (48 px mini), états `pressed` / `disabled` gérés par `Pressable` (aucun `hover:`), **0 couleur hex** dans `src/components` et `app` (vérifié par script), couleurs uniquement via `omda-*` / `status-*`.
+  - Les 27 classes de tokens utilisées dans `app/` et `src/` sont toutes réellement générées par Tailwind (vérifié) : aucune classe de couleur morte.
+  - Règles métier rappelées dans les composants : vert `status-success` réservé au succès confirmé par le serveur (`StatusPill`, `InfoBanner`, `UploadTile`), montant jamais en vert ni codé en dur (`AmountCard` = prop fournie par un service), `ErrorState` utilise un bouton `secondary` pour ne pas afficher de vert près d’une action de paiement.
+  - Écran catalogue : données de démonstration explicites (`DEMO_*`) limitées à l’écran de développement, navigation linéaire (bouton retour), aucun menu.
   - Étape 2 = tokens NativeWind uniquement : aucun écran fonctionnel, aucun composant UI, aucune couche data/services.
   - Tokens couleur (§5 du cahier des charges) : `omda-green`, `omda-greenDark`, `omda-ochre`, `omda-ochreDark`, `omda-black`, `omda-white`, `omda-warmGray`, `omda-borderGray`, `omda-textGray`, `omda-errorRed`, `omda-infoBlueGray`.
   - Tokens sémantiques (§6) : `status-success` (= vert OMDA), `status-pending` (= ocre OMDA), `status-error` (= rouge), `status-info` (= bleu-gris).
