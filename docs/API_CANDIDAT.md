@@ -248,28 +248,51 @@ déclenché ni demandé à ce stade (règle métier 1).
 
 ```json
 {
-  "frais": { "type": "ADHESION", "libelle": "Frais d'adhésion", "montant": 150000, "devise": "MGA", "modifiable": false },
+  "paiement_du": { "type": "ADHESION", "montant": 150000, "devise": "MGA" },
   "modes": [
-    { "code": "MOBILE_MONEY", "libelle": "Mobile Money", "actif": true,
+    {
+      "mode": "MOBILE_MONEY",
+      "libelle": "Mobile Money",
       "operateurs": [
-        { "code": "MVOLA", "libelle": "M-Vola", "actif": true, "numero_attendu_prefixe": "+26134", "instructions": "Vous recevrez une demande de confirmation sur votre téléphone." },
-        { "code": "ORANGE_MONEY", "libelle": "Orange Money", "actif": true, "numero_attendu_prefixe": "+26132", "instructions": "Validez la demande reçue par SMS." },
-        { "code": "AIRTEL_MONEY", "libelle": "Airtel Money", "actif": false, "numero_attendu_prefixe": "+26133", "instructions": null }
-      ] },
-    { "code": "VIREMENT", "libelle": "Virement bancaire", "actif": true, "coordonnees": null }
-  ],
-  "coordonnees_bancaires": [
-    { "id": "c1...", "libelle": "BNI — Association OMDA", "titulaire": "OMDA", "iban_ou_numero_compte": "00001 00000 12345678901 12", "banque": "BNI", "agence": "Antananarivo", "instructions": "Indiquez votre numéro de dossier en libellé.", "actif": true }
+        { "code": "MVOLA", "libelle": "MVola", "actif": true, "ordre": 1, "updated_at": "2026-09-20T05:00:00.000Z" },
+        { "code": "ORANGE_MONEY", "libelle": "Orange Money", "actif": true, "ordre": 2, "updated_at": "2026-09-20T05:00:00.000Z" },
+        { "code": "AIRTEL_MONEY", "libelle": "Airtel Money", "actif": false, "ordre": 3, "updated_at": "2026-09-20T05:00:00.000Z" }
+      ],
+      "coordonnees_bancaires": []
+    },
+    {
+      "mode": "VIREMENT_BANCAIRE",
+      "libelle": "Virement bancaire",
+      "operateurs": [],
+      "coordonnees_bancaires": [
+        { "id": "c1b0f2e4-...", "titulaire": "Association OMDA", "banque": "BNI",
+          "numero_compte": "00001 00000 12345678901 12", "iban": null, "swift": "BNIMGMGX",
+          "instructions": "Indiquez votre numéro de dossier (OMDA-…) en libellé du virement.",
+          "actif": true, "updated_at": "2026-09-20T05:00:00.000Z" }
+      ]
+    }
   ]
 }
 ```
 
 Règles :
+- réponse identique au type `OptionsPaiementCandidat` du contrat TS :
+  `paiement_du` (montant dû) + `modes` ;
 - `409 DEMANDE_NON_VALIDEE` si le dossier n'est pas `VALIDEE` ;
+- `paiement_du.montant` suit la ligne `tarif` (Ariary entier, `devise: "MGA"`) :
+  le montant vient **toujours** du serveur, jamais de l'UI ;
 - les **opérateurs et modes inactifs doivent être absents ou marqués `actif: false`** —
   l'app n'affiche **que** les éléments actifs (liste 100 % dynamique, jamais de
   codage dur côté UI) ;
-- le montant est fourni par le serveur ; l'app ne fait qu'afficher.
+- `operateurs` reprend la table `operateur_mobile_money` (`code`, `libelle`,
+  `actif`, `ordre`, `updated_at`) ; un opérateur désactivé (`AIRTEL_MONEY`
+  ci-dessus) doit être **absent** de l'UI ;
+- `coordonnees_bancaires` reprend **exactement** les colonnes de la table
+  (`titulaire`, `banque`, `numero_compte`, `iban`, `swift`, `instructions`,
+  `actif`) et n'est renseigné que pour `mode = 'VIREMENT_BANCAIRE'` ; seules les
+  entrées `actif = true` sont affichées ;
+- un champ d'aide facultatif (`instructions` par mode/opérateur) peut être ajouté
+  par le serveur : il n'est jamais stocké en base, il est purement affiché.
 
 ### 5.7 Initier un paiement
 
@@ -278,18 +301,22 @@ Règles :
 ```json
 {
   "numero_dossier": "OMDA-2026-000123",
-  "type": "ADHESION",
   "mode": "MOBILE_MONEY",
   "operateur": "MVOLA",
   "numero_telephone": "+261341234567"
 }
 ```
 
-Variante virement :
+Variante virement bancaire :
 
 ```json
-{ "numero_dossier": "OMDA-2026-000123", "type": "ADHESION", "mode": "VIREMENT" }
+{ "numero_dossier": "OMDA-2026-000123", "mode": "VIREMENT_BANCAIRE" }
 ```
+
+Le `code_suivi` du contrat TS (`InitierPaiementEntree`) voyage dans l'en-tête
+`X-Code-Suivi`, et le `type` de paiement n'est **pas** envoyé : le serveur
+l'impose (ici `ADHESION`, contexte `demande_adhesion_id` selon
+`paiement_contexte_chk`).
 
 `201 Created`
 
@@ -297,13 +324,17 @@ Variante virement :
 {
   "paiement_id": "3a9c2f10-...",
   "reference_interne": "PAI-2026-000742",
+  "reference_externe": null,
   "type": "ADHESION",
-  "mode": "MOBILE_MONEY",
-  "operateur": "MVOLA",
   "montant": 150000,
   "devise": "MGA",
+  "mode": "MOBILE_MONEY",
+  "operateur": "MVOLA",
   "statut": "EN_ATTENTE_CONFIRMATION",
-  "created_at": "2026-09-25T07:00:00.000Z"
+  "motif_echec": null,
+  "date_initiation": "2026-09-25T07:00:00.000Z",
+  "date_confirmation": null,
+  "instruction": "Validez la demande de paiement reçue sur votre téléphone."
 }
 ```
 
@@ -328,25 +359,29 @@ Règles :
 {
   "paiement_id": "3a9c2f10-...",
   "reference_interne": "PAI-2026-000742",
+  "reference_externe": "MM-2026-8891",
   "type": "ADHESION",
   "mode": "MOBILE_MONEY",
   "operateur": "MVOLA",
   "montant": 150000,
   "devise": "MGA",
   "statut": "REUSSI",
-  "date_paiement": "2026-09-25T07:03:22.000Z",
-  "date_confirmation_serveur": "2026-09-25T07:03:25.000Z",
-  "mode_confirmation": "AUTOMATIQUE",
-  "message_refus": null
+  "motif_echec": null,
+  "date_initiation": "2026-09-25T07:00:00.000Z",
+  "date_confirmation": "2026-09-25T07:03:25.000Z",
+  "instruction": null
 }
 ```
 
-- **Mobile Money** : confirmation `AUTOMATIQUE` côté serveur (webhook opérateur) ;
-  l'app **interroge** cet endpoint (ex. toutes les 3 s, backoff exponentiel) ;
-- **Virement** : reste `EN_ATTENTE_VERIFICATION_AGENT` tant qu'un agent n'a pas
-  validé la preuve — **jamais** de `REUSSI` automatique ;
+- **Mobile Money** : confirmation **automatique** côté serveur (webhook opérateur,
+  trace dans `journal_paiement`) ; l'app **interroge** cet endpoint
+  (ex. toutes les 3 s, backoff exponentiel) ;
+- **Virement bancaire** : reste `EN_ATTENTE_VERIFICATION_AGENT` tant qu'un agent
+  n'a pas validé la preuve — **jamais** de `REUSSI` automatique ;
 - l'app ne passe à l'écran « Succès » que si `statut = 'REUSSI'` **et**
-  `date_confirmation_serveur <> null` (confirmation externe impérative).
+  `date_confirmation <> null` (confirmation externe impérative), avec
+  `reference_externe` renseignée quand l'opérateur la fournit ;
+- `motif_echec` : renseigné pour `ECHEC_*` et `REJETE` (jamais vide dans ces cas).
 
 ---
 
@@ -362,15 +397,17 @@ Règles :
 
 ```json
 {
-  "url_signee": "https://storage.omda.mg/preuves/PAI-2026-000742/recu.pdf?X-Amz-...",
-  "methode_http": "PUT",
-  "expire_le": "2026-09-25T07:30:00.000Z",
-  "chemin_stockage": "preuves/PAI-2026-000742/recu.pdf"
+  "url": "https://storage.omda.mg/preuves/PAI-2026-000742/recu.pdf?X-Amz-...",
+  "chemin_stockage": "preuves/PAI-2026-000742/recu.pdf",
+  "expire_at": "2026-09-25T07:30:00.000Z",
+  "champs_formulaire": null
 }
 ```
 
-L'app téléverse le fichier **directement vers le storage** via `PUT` (avec
-progression et retry), puis déclare le dépôt (§5.10). Erreurs
+Réponse identique au type `UrlTeleversementSignee` du contrat TS. L'app téléverse
+le fichier **directement vers le storage** (`PUT` sur `url` ; si
+`champs_formulaire` est renseigné, `POST` multipart avec ces champs), avec
+progression et retry, puis déclare le dépôt (§5.10). Erreurs
 `FICHIER_TROP_VOLUMINEUX` / `TYPE_FICHIER_NON_AUTORISE` renvoyées aussi à l'étape
 de déclaration, pour revalider côté serveur.
 
@@ -393,17 +430,17 @@ de déclaration, pour revalider côté serveur.
 {
   "paiement_id": "3a9c2f10-...",
   "reference_interne": "PAI-2026-000742",
+  "reference_externe": null,
   "type": "ADHESION",
-  "mode": "VIREMENT",
+  "mode": "VIREMENT_BANCAIRE",
   "operateur": null,
   "montant": 150000,
   "devise": "MGA",
   "statut": "EN_ATTENTE_VERIFICATION_AGENT",
-  "created_at": "2026-09-25T07:10:00.000Z",
-  "date_paiement": null,
-  "date_confirmation_serveur": null,
-  "mode_confirmation": null,
-  "message_refus": null
+  "motif_echec": null,
+  "date_initiation": "2026-09-25T07:10:00.000Z",
+  "date_confirmation": null,
+  "instruction": null
 }
 ```
 
