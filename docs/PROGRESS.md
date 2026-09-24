@@ -1,7 +1,13 @@
 # Avancement OMDA Mobile
-- Étape en cours : 3
-- Dernier test OK : `npx tsc --noEmit` (0 erreur) + `npx tailwindcss` (27 classes de tokens générées, 0 erreur) + `npx expo export --platform android` (bundle réussi, catalogue inclus) — 24/09/2026
+- Étape en cours : 4
+- Dernier test OK : `npx tsc --noEmit` (0 erreur) + `npx expo export --platform android` (bundle réussi, 1644 modules, toutes les routes présentes) — 24/09/2026
 - Notes :
+  - Étape 4 = navigation uniquement : écrans « squelettes » (un titre + 1 ou 2 boutons de navigation de test), aucun contenu métier.
+  - Arborescence Expo Router : `(public)` (`index.tsx` = route `/`, `documentation`, `article`, `tarifs`, `a-propos`, `connexion`, `mot-de-passe-oublie`), `(adhesion)` (`identite`, `refus-age`, `categorie`, `documents-oeuvres`, `recapitulatif`, `confirmation`), `(candidat)` (`suivi`, `paiement`, `succes-adhesion`), `(auth-required)/changer-mot-de-passe` (écran bloquant), `(membre)` (Stack interne : `(tabs)` + `depot-oeuvre` + `fiche-oeuvre`), plus `dev/catalogue`.
+  - ⚠️ Contrainte TabBar respectée : `Tabs` n’est importé QUE dans `app/(membre)/(tabs)/_layout.tsx` (5 onglets : Accueil, Œuvres, Cotisation, Profil, Notifications) — vérifié par recherche sur tout `app/`. Tous les autres groupes sont des `Stack` sans menu.
+  - Espace membre = Stack → les écrans `depot-oeuvre` et `fiche-oeuvre` s’empilent AU-DESSUS des onglets (bouton retour via `ScreenContainer`) ; les 5 onglets vivent sous `(membre)/(tabs)`.
+  - `app/index.tsx` (écran provisoire de l’étape 1) a été supprimé : l’accueil public est désormais `app/(public)/index.tsx` (route `/`) — cela évitait deux routes `/` en conflit.
+  - Vérifications : 25 routes déclarées ; tous les `router.push(...)` pointent vers une route existante (aucun lien mort) ; couleurs de la TabBar via `src/theme/colors.ts` (aucun hex) ; « dev/catalogue » reste accessible uniquement par URL (hors parcours utilisateur).
   - Étape 3 = composants UI uniquement : 14 composants dans `src/components/ui` (+ barrel `index.ts`) et un écran catalogue `app/dev/catalogue.tsx` (route `/dev/catalogue`).
   - Composants créés : `Button` (primary/secondary/destructive, désactivé, chargement, icône), `TextField` (libellé/aide/erreur + focus), `SelectField` (modal 48 px, liste vide gérée), `UploadTile` (vide / en cours / attente de vérification / confirmé / erreur, progression + « Réessayer »), `StatusPill` (success/pending/error/info), `StepTimeline` (fait / en cours / à venir / rejeté), `AmountCard` (+ utilitaire `formaterMontantAriary`), `InfoBanner` (4 variantes), `EmptyState`, `ErrorState` (message + « Réessayer »), `LoadingState`, `ScreenContainer`, `AppHeader` (retour 48 × 48 px) et `Icone` (wrapper FontAwesome tokenisé).
   - Contraintes respectées : zones tactiles `min-h-12` (48 px mini), états `pressed` / `disabled` gérés par `Pressable` (aucun `hover:`), **0 couleur hex** dans `src/components` et `app` (vérifié par script), couleurs uniquement via `omda-*` / `status-*`.
