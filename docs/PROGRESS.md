@@ -1,4 +1,12 @@
 # Avancement OMDA Mobile
-- Étape en cours : 0
-- Dernier test OK : —
-- Notes : —
+- Étape en cours : 1
+- Dernier test OK : `npx tsc --noEmit` (0 erreur) + `npx expo export --platform android` (bundle réussi) — 24/09/2026
+- Notes :
+  - Étape 1 = initialisation uniquement : aucun écran métier, aucun composant UI, aucune couche data/services pour l’instant.
+  - Stack : Expo SDK 57.0.24 + React Native 0.86.3 + React 19.2.3 + TypeScript 6.0.3 ; `package.json` → `"main": "expo-router/entry"` et script `npm run typecheck`.
+  - Expo Router : `app/_layout.tsx` (Stack sans en-tête + `StatusBar`) et `app/index.tsx` (écran provisoire de vérification, sans aucun menu). Le `SafeAreaProvider` est déjà fourni par Expo Router.
+  - NativeWind 4.2.7 + Tailwind CSS 3.4 : `tailwind.config.js` (preset `nativewind/preset`, tokens couleur `omda-*` et `status-*` de la palette officielle), `babel.config.js` (`babel-preset-expo` avec `jsxImportSource: "nativewind"` + preset `nativewind/babel`), `metro.config.js` (`withNativeWind(config, { input: './global.css' })`), `global.css`, `nativewind-env.d.ts` (références `expo/types` + `nativewind/types`).
+  - FontAwesome : `@expo/vector-icons`, pack `FontAwesome6` (noms conformes au mapping `fa*` du cahier des charges : `circle-check`, `circle-info`, `clock`, …). Les icônes héritent de la couleur d’un `<Text>` portant un token `status-*`.
+  - Variables d’environnement : `.env.example` créé (`EXPO_PUBLIC_API_BASE_URL`, `EXPO_PUBLIC_SUPABASE_URL`, `EXPO_PUBLIC_SUPABASE_ANON_KEY`, `EXPO_PUBLIC_USE_MOCKS=true`) ; `.env` ignoré par git.
+  - Seules les couleurs sont tokenisées pour l’instant (typographie/espacement viendront avec le design system, étape 2).
+  - Lancement : `npx expo start` (ou `npm start`) puis `a` (Android) / `i` (iOS) — QR code avec Expo Go.
