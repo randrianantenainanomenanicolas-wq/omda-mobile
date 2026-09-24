@@ -1,0 +1,497 @@
+# OMDA — Contrat REST de l'API Candidat (proposition)
+
+Version : 1.0 — cible : API Node/Express consommée par l'application mobile pour le
+parcours **visiteur / candidat** (utilisateur SANS compte).
+
+> Ce document décrit le contrat HTTP que l'implémentation `HttpCandidateApi`
+> devra respecter. Il correspond au contrat TypeScript
+> `src/services/contracts/candidateApi.ts` (`CandidateApi`).
+>
+> **Hors périmètre** : l'espace membre (auth + données) passe par **Supabase**
+> (Auth, Postgres, Storage) — voir `MemberRepository` et `AuthService`.
+> Aucun endpoint d'administration/agent n'est prévu ici (pas de back-office).
+
+---
+
+## 1) Conventions
+
+| Élément | Règle |
+|---|---|
+| Base URL | `EXPO_PUBLIC_API_BASE_URL` (ex. `https://api.omda.mg`) |
+| Préfixe | `/v1` (versionné, rétrocompatible) |
+| Corps | JSON UTF-8, `Content-Type: application/json` (sauf uploads : `multipart/form-data`) |
+| Encodage des montants | `integer`, **Ariary entiers** (pas de centimes), `devise: "MGA"` |
+| Dates | ISO 8601 UTC (`2026-09-24T08:30:00.000Z`) ; dates civiles `AAAA-MM-JJ` |
+| Identifiants | UUID v4 côté serveur |
+| Langue | Messages d'erreur en **français (vouvoiement)**, prêts à afficher |
+| Authentification candidat | En-têtes `X-Numero-Dossier` + `X-Code-Suivi` (jeton de suivi communiqué une seule fois) |
+| Idempotence | `Idempotency-Key: <uuid>` obligatoire sur `POST /v1/paiements` et `POST /v1/demandes/{numero}/envoi` |
+| Pagination | `?limite=` / `?curseur=` pour les listes (documentation) |
+| Corrélation | Réponse en erreur 5xx : `reference` à citer au support |
+
+**Sécurité** : le candidat n'a **aucun accès direct** à la base ni au storage
+en écriture libre ; les pièces/œuvres/preuves passent par les endpoints d'upload
+(ou par une URL signée à durée courte, cf. §5.9).
+
+---
+
+## 2) Format d'erreur normalisé
+
+Toutes les erreurs (4xx/5xx) renvoient le même enveloppe :
+
+```json
+{
+  "code": "DEMANDE_NON_VALIDEE",
+  "message": "Votre demande n'est pas encore validée : le paiement n'est pas disponible pour le moment.",
+  "details": { "statut": "EN_COURS_DE_VERIFICATION" },
+  "reference": "err_01J8Z..."
+}
+```
+
+- `code` : identifiant **stable** (jamais traduit, destiné au code mobile) ;
+- `message` : texte français destiné à l'affichage ;
+- `details` : objet libre (facultatif) ;
+- `reference` : identifiant de corrélation (facultatif, surtout 5xx).
+
+### Mapping vers le type `Result` du mobile
+
+| Situation HTTP | `Result` mobile | Type d'erreur |
+|---|---|---|
+| Aucune réponse / DNS / timeout | `{ ok: false }` | `reseau` |
+| `500`, `502`, `503`, `504`, JSON invalide, contrat rompu | `{ ok: false }` | `serveur` (`statut_http`, `reference`) |
+| `400`, `401`, `403`, `404`, `409`, `413`, `415`, `422`, `429` avec `code` | `{ ok: false }` | `metier` (`code`, `message`, `details`) |
+| `200`, `201`, `202` | `{ ok: true, valeur }` | — |
+
+> Règle mobile : une erreur métier n'est jamais déduite localement ; elle vient
+> toujours du serveur (jamais de succès ni d'échec inventé par l'app).
+
+---
+
+## 3) Codes d'erreur métier (candidat)
+
+| `code` | HTTP | Message (exemple) | Contexte |
+|---|---|---|---|
+| `DEMANDE_INTROUVABLE` | 404 | « Nous ne trouvons aucune demande avec ces informations. » | suivi / paiement |
+| `CODE_SUIVI_INVALIDE` | 401 | « Le code de suivi ne correspond pas à ce numéro de dossier. » | suivi / paiement |
+| `DEMANDE_NON_VALIDEE` | 409 | « Votre demande n'est pas encore validée : le paiement n'est pas disponible. » | options paiement / initiation |
+| `DOSSIER_INCOMPLET` | 422 | « Votre dossier est incomplet : 2 œuvres et 1 attestation par œuvre sont exigées. » | envoi de demande |
+| `AGE_INSUFFISANT` | 422 | « Une demande d'adhésion est possible à partir de 15 ans. » | création / envoi |
+| `AUTORISATION_PARENTALE_REQUISE` | 422 | « Une autorisation parentale est exigée pour les personnes de 15 à 17 ans. » | envoi |
+| `OPERATEUR_INDISPONIBLE` | 409 | « Cet opérateur Mobile Money est momentanément indisponible. » | initiation paiement |
+| `PAIEMENT_DEJA_REUSSI` | 409 | « Le paiement de ces frais a déjà été confirmé. » | initiation paiement |
+| `FICHIER_TROP_VOLUMINEUX` | 413 | « Le fichier dépasse la taille maximale de 20 Mo. » | upload |
+| `TYPE_FICHIER_NON_AUTORISE` | 415 | « Ce format de fichier n'est pas accepté (JPEG, PNG ou PDF). » | upload |
+
+**Codes techniques** (à ne pas confondre avec les codes métier) :
+`TROP_DE_TENTATIVES` (429, renvoyé par l'authentification **membre** Supabase),
+`SERVICE_INDISPONIBLE` (503).
+
+---
+
+## 4) Enveloppe de réponse
+
+Aucune enveloppe `data` générique : les endpoints renvoient directement la
+ressource (ou une liste). Les erreurs suivent §2. Les champs suivent le
+**snake_case** du schéma Postgres (`docs/SCHEMA_DB.md`) pour éviter tout
+mapping implicite.
+
+Ce qui n'est **jamais** renvoyé :
+
+- `jeton_suivi_hash` (le code de suivi n'est en clair que dans la réponse de
+  création / d'envoi) ;
+- `mot_de_passe_hash`, jetons internes, données d'autres candidats.
+
+---
+
+## 5) Endpoints — parcours adhésion / candidat
+
+### 5.1 Créer une demande (brouillon)
+
+`POST /v1/demandes`
+
+```json
+{
+  "identite": {
+    "nom": "RAKOTO",
+    "prenom": "Jean",
+    "date_naissance": "1996-04-12",
+    "cin": "101234567890",
+    "telephone": "+261341234567",
+    "email": "jean.rakoto@example.mg",
+    "adresse": "Lot 12 Bis, Antananarivo 101"
+  },
+  "categorie_id": "8f0f0d3a-1c2b-4a1e-9f0e-1d2c3b4a5e6f"
+}
+```
+
+`201 Created`
+
+```json
+{
+  "demande_id": "2b1b7a3c-...",
+  "numero_dossier": "OMDA-2026-000123",
+  "code_suivi": "K7X4-9B2Q",
+  "statut": "BROUILLON",
+  "created_at": "2026-09-24T08:30:00.000Z"
+}
+```
+
+Règles : `AGE_INSUFFISANT` si moins de 15 ans ; `code_suivi` renvoyé **en clair
+une seule fois** ; l'app le conserve (stockage local) et l'affiche à l'écran L.
+
+### 5.2 Mettre à jour un brouillon
+
+`PATCH /v1/demandes/{numero_dossier}` — en-têtes `X-Code-Suivi`
+
+```json
+{ "identite": { "adresse": "Lot 8, Antsirabe 110" }, "categorie_id": "..." }
+```
+
+`200 OK` → même objet que 5.1. Refus si `statut <> 'BROUILLON'` (409 `metier`).
+
+### 5.3 Téléverser un fichier (pièce, œuvre, attestation)
+
+`POST /v1/demandes/{numero_dossier}/fichiers` — `multipart/form-data`
+
+| Part | Contenu |
+|---|---|
+| `fichier` | binaire (≤ **20 Mo**) |
+| `bucket` | `pieces` \| `oeuvres` \| `preuves` |
+| `type` | pour `pieces` : `PHOTO` \| `CIN` \| `ACTE_NAISSANCE` \| `CERTIFICAT_RESIDENCE` \| `AUTORISATION_PARENTALE` \| `AUTRE` |
+| `oeuvre_id` | facultatif (rattachement à une œuvre) |
+
+MIME autorisés par bucket (identiques au schéma) :
+`pieces` → `image/jpeg`, `image/png`, `application/pdf` ;
+`oeuvres` → + `audio/mpeg`, `audio/wav` ;
+`preuves` → `image/jpeg`, `image/png`, `application/pdf`.
+
+`201 Created`
+
+```json
+{ "chemin_stockage": "pieces/OMDA-2026-000123/cin.pdf",
+  "mime_type": "application/pdf",
+  "taille_octets": 842133 }
+```
+
+Le mobile réutilise ce `chemin_stockage` dans le récapitulatif et l'envoi.
+Progression : le client peut suivre l'octet-count du `multipart` (implémentation
+`HttpCandidateApi`) ; erreurs `FICHIER_TROP_VOLUMINEUX` / `TYPE_FICHIER_NON_AUTORISE`.
+
+### 5.4 Envoyer la demande (dossier complet)
+
+`POST /v1/demandes/{numero_dossier}/envoi` — en-têtes `X-Code-Suivi` + `Idempotency-Key`
+
+```json
+{
+  "categorie_id": "8f0f0d3a-...",
+  "pieces": [
+    { "type": "PHOTO", "chemin_stockage": "pieces/.../photo.jpg", "mime_type": "image/jpeg", "taille_octets": 210332 },
+    { "type": "CIN", "chemin_stockage": "pieces/.../cin.pdf", "mime_type": "application/pdf", "taille_octets": 842133 }
+  ],
+  "oeuvres": [
+    { "titre": "La varangue", "categorie_id": "...", "annee": 2024,
+      "fichier": { "chemin_stockage": "oeuvres/.../varangue.pdf", "mime_type": "application/pdf", "taille_octets": 1204332 },
+      "attestations": [ { "chemin_stockage": "oeuvres/.../attestation-varangue.pdf", "mime_type": "application/pdf", "taille_octets": 330211 } ] }
+  ]
+}
+```
+
+`201 Created`
+
+```json
+{
+  "numero_dossier": "OMDA-2026-000123",
+  "code_suivi": "K7X4-9B2Q",
+  "statut": "ENVOYEE",
+  "date_soumission": "2026-09-24T08:45:10.000Z",
+  "delai_indicatif_heures": 72
+}
+```
+
+Règles serveur : ≥ **2 œuvres** et **1 attestation par œuvre** (`DOSSIER_INCOMPLET`),
+`AUTORISATION_PARENTALE_REQUISE` pour les 15–17 ans, **aucun paiement** n'est
+déclenché ni demandé à ce stade (règle métier 1).
+
+### 5.5 Suivre une demande
+
+`GET /v1/suivi/{numero_dossier}` — en-têtes `X-Code-Suivi`
+
+`200 OK`
+
+```json
+{
+  "numero_dossier": "OMDA-2026-000123",
+  "statut": "VALIDEE",
+  "derniere_mise_a_jour": "2026-09-25T06:12:00.000Z",
+  "etapes": [
+    { "statut": "ENVOYEE", "libelle": "Demande reçue", "realisee": true, "date": "2026-09-24T08:45:10.000Z" },
+    { "statut": "EN_COURS_DE_VERIFICATION", "libelle": "Vérification du dossier", "realisee": true, "date": "2026-09-24T09:00:00.000Z" },
+    { "statut": "VALIDEE", "libelle": "Dossier validé", "realisee": true, "date": "2026-09-25T06:12:00.000Z" },
+    { "statut": "ADHESION_TERMINEE", "libelle": "Adhésion finalisée", "realisee": false, "date": null }
+  ],
+  "motif_rejet": null,
+  "paiement_du": { "type": "ADHESION", "montant": 150000, "devise": "MGA" }
+}
+```
+
+- `motif_rejet` : renseigné **uniquement** si `statut = 'REJETEE'` (jamais vide dans ce cas) ;
+- `paiement_du` : `null` tant que le dossier n'est pas `VALIDEE` — le montant est
+  **toujours** fourni par le serveur (jamais calculé dans l'UI).
+
+---
+
+### 5.6 Options de paiement disponibles
+
+`GET /v1/paiements/options/{numero_dossier}` — en-têtes `X-Code-Suivi`
+
+`200 OK`
+
+```json
+{
+  "frais": { "type": "ADHESION", "libelle": "Frais d'adhésion", "montant": 150000, "devise": "MGA", "modifiable": false },
+  "modes": [
+    { "code": "MOBILE_MONEY", "libelle": "Mobile Money", "actif": true,
+      "operateurs": [
+        { "code": "MVOLA", "libelle": "M-Vola", "actif": true, "numero_attendu_prefixe": "+26134", "instructions": "Vous recevrez une demande de confirmation sur votre téléphone." },
+        { "code": "ORANGE_MONEY", "libelle": "Orange Money", "actif": true, "numero_attendu_prefixe": "+26132", "instructions": "Validez la demande reçue par SMS." },
+        { "code": "AIRTEL_MONEY", "libelle": "Airtel Money", "actif": false, "numero_attendu_prefixe": "+26133", "instructions": null }
+      ] },
+    { "code": "VIREMENT", "libelle": "Virement bancaire", "actif": true, "coordonnees": null }
+  ],
+  "coordonnees_bancaires": [
+    { "id": "c1...", "libelle": "BNI — Association OMDA", "titulaire": "OMDA", "iban_ou_numero_compte": "00001 00000 12345678901 12", "banque": "BNI", "agence": "Antananarivo", "instructions": "Indiquez votre numéro de dossier en libellé.", "actif": true }
+  ]
+}
+```
+
+Règles :
+- `409 DEMANDE_NON_VALIDEE` si le dossier n'est pas `VALIDEE` ;
+- les **opérateurs et modes inactifs doivent être absents ou marqués `actif: false`** —
+  l'app n'affiche **que** les éléments actifs (liste 100 % dynamique, jamais de
+  codage dur côté UI) ;
+- le montant est fourni par le serveur ; l'app ne fait qu'afficher.
+
+### 5.7 Initier un paiement
+
+`POST /v1/paiements` — en-têtes `X-Code-Suivi` + `Idempotency-Key`
+
+```json
+{
+  "numero_dossier": "OMDA-2026-000123",
+  "type": "ADHESION",
+  "mode": "MOBILE_MONEY",
+  "operateur": "MVOLA",
+  "numero_telephone": "+261341234567"
+}
+```
+
+Variante virement :
+
+```json
+{ "numero_dossier": "OMDA-2026-000123", "type": "ADHESION", "mode": "VIREMENT" }
+```
+
+`201 Created`
+
+```json
+{
+  "paiement_id": "3a9c2f10-...",
+  "reference_interne": "PAI-2026-000742",
+  "type": "ADHESION",
+  "mode": "MOBILE_MONEY",
+  "operateur": "MVOLA",
+  "montant": 150000,
+  "devise": "MGA",
+  "statut": "EN_ATTENTE_CONFIRMATION",
+  "created_at": "2026-09-25T07:00:00.000Z"
+}
+```
+
+Règles :
+- dossier non `VALIDEE` → `409 DEMANDE_NON_VALIDEE` ;
+- opérateur inactif → `409 OPERATEUR_INDISPONIBLE` ;
+- déjà `REUSSI` → `409 PAIEMENT_DEJA_REUSSI` ;
+- `201` = **initiation uniquement** : ne JAMAIS afficher de vert ni de
+  « paiement réussi » sur cette réponse (le statut réel est `INITIE` /
+  `EN_ATTENTE_CONFIRMATION`).
+
+### 5.8 État d'un paiement (polling)
+
+`GET /v1/paiements/{reference_interne}` — en-têtes `X-Code-Suivi`
+
+> La clé de polling est la **référence interne** (`PAI-2026-000742`), seule
+> valeur exposée au candidat côté `obtenirEtatPaiement` du contrat mobile.
+
+`200 OK` → même objet que 5.7 avec les champs complétés :
+
+```json
+{
+  "paiement_id": "3a9c2f10-...",
+  "reference_interne": "PAI-2026-000742",
+  "type": "ADHESION",
+  "mode": "MOBILE_MONEY",
+  "operateur": "MVOLA",
+  "montant": 150000,
+  "devise": "MGA",
+  "statut": "REUSSI",
+  "date_paiement": "2026-09-25T07:03:22.000Z",
+  "date_confirmation_serveur": "2026-09-25T07:03:25.000Z",
+  "mode_confirmation": "AUTOMATIQUE",
+  "message_refus": null
+}
+```
+
+- **Mobile Money** : confirmation `AUTOMATIQUE` côté serveur (webhook opérateur) ;
+  l'app **interroge** cet endpoint (ex. toutes les 3 s, backoff exponentiel) ;
+- **Virement** : reste `EN_ATTENTE_VERIFICATION_AGENT` tant qu'un agent n'a pas
+  validé la preuve — **jamais** de `REUSSI` automatique ;
+- l'app ne passe à l'écran « Succès » que si `statut = 'REUSSI'` **et**
+  `date_confirmation_serveur <> null` (confirmation externe impérative).
+
+---
+
+### 5.9 URL signée pour déposer une preuve de virement
+
+`POST /v1/paiements/{paiement_id}/preuve/url` — en-têtes `X-Code-Suivi`
+
+```json
+{ "nom_fichier": "recu-virement.pdf", "mime_type": "application/pdf", "taille_octets": 183022 }
+```
+
+`201 Created`
+
+```json
+{
+  "url_signee": "https://storage.omda.mg/preuves/PAI-2026-000742/recu.pdf?X-Amz-...",
+  "methode_http": "PUT",
+  "expire_le": "2026-09-25T07:30:00.000Z",
+  "chemin_stockage": "preuves/PAI-2026-000742/recu.pdf"
+}
+```
+
+L'app téléverse le fichier **directement vers le storage** via `PUT` (avec
+progression et retry), puis déclare le dépôt (§5.10). Erreurs
+`FICHIER_TROP_VOLUMINEUX` / `TYPE_FICHIER_NON_AUTORISE` renvoyées aussi à l'étape
+de déclaration, pour revalider côté serveur.
+
+### 5.10 Déclarer la preuve de virement déposée
+
+`POST /v1/paiements/{paiement_id}/preuve` — en-têtes `X-Code-Suivi`
+
+```json
+{
+  "chemin_stockage": "preuves/PAI-2026-000742/recu.pdf",
+  "mime_type": "application/pdf",
+  "taille_octets": 183022,
+  "reference_fournie": "VIR-2026-8891"
+}
+```
+
+`201 Created`
+
+```json
+{
+  "paiement_id": "3a9c2f10-...",
+  "reference_interne": "PAI-2026-000742",
+  "type": "ADHESION",
+  "mode": "VIREMENT",
+  "operateur": null,
+  "montant": 150000,
+  "devise": "MGA",
+  "statut": "EN_ATTENTE_VERIFICATION_AGENT",
+  "created_at": "2026-09-25T07:10:00.000Z",
+  "date_paiement": null,
+  "date_confirmation_serveur": null,
+  "mode_confirmation": null,
+  "message_refus": null
+}
+```
+
+**Règle critique** : ce `201` n'est **pas** un succès. Le statut passe en
+`EN_ATTENTE_VERIFICATION_AGENT` ; le vert (`status-success`) reste interdit
+jusqu'à ce que le polling §5.8 renvoie `REUSSI` après vérification humaine.
+
+---
+
+## 6) Endpoints publics (`PublicContentService`, sans authentification)
+
+| Méthode du contrat | Endpoint | Retour |
+|---|---|---|
+| `listerDocumentation` | `GET /v1/documentation` | `Documentation[]` — articles publiés, triés par `ordre` |
+| `obtenirArticle` | `GET /v1/documentation/{slug}` | `Documentation` (404 si inconnu/non publié) |
+| `listerCategories` | `GET /v1/categories?actives=true` | `Categorie[]` |
+| `listerTarifs` | `GET /v1/tarifs?actives=true&type_operation=&categorie_id=` | `Tarif[]` |
+| `estimerMontant` | `GET /v1/tarifs/estimation?type_operation=&categorie_id=` | `EstimationMontant` avec `estimation: true` + `mention` |
+| `obtenirCoordonneesBancaires` | `GET /v1/coordonnees-bancaires?actives=true` | `CoordonneesBancaires[]` |
+| `listerOperateursMobileMoney` | `GET /v1/operateurs-mobile-money?actifs=true` | `OperateurMobileMoney[]` |
+
+`GET /v1/tarifs/estimation` renvoie par exemple :
+
+```json
+{
+  "type_operation": "ADHESION",
+  "categorie_id": "8f0f0d3a-...",
+  "montant": 150000,
+  "devise": "MGA",
+  "estimation": true,
+  "mention": "Estimation — le montant final est confirmé par le serveur.",
+  "valide_jusqu_au": "2026-12-31"
+}
+```
+
+Tout est **dynamique** : désactivation côté serveur ⇒ élément absent de la
+liste ; l'UI ne codifie aucun montant, opérateur ou tarif (règle AI_RULES).
+
+---
+
+## 7) Correspondance contrat mobile ↔ HTTP
+
+| Méthode `CandidateApi` | Requête |
+|---|---|
+| `creerDemande` | `POST /v1/demandes` (§5.1) |
+| `mettreAJourDemande` | `PATCH /v1/demandes/{numero_dossier}` (§5.2) |
+| `soumettreDemande` | `POST /v1/demandes/{numero_dossier}/envoi` (§5.4) |
+| `televerserFichier` | `POST /v1/demandes/{numero_dossier}/fichiers` si `bucket ∈ {pieces, oeuvres}` (§5.3) ; sinon URL signée §5.9 |
+| `suivreDemande` | `GET /v1/suivi/{numero_dossier}` (§5.5) |
+| `obtenirOptionsPaiement` | `GET /v1/paiements/options/{numero_dossier}` (§5.6) |
+| `initierPaiement` | `POST /v1/paiements` (§5.7) |
+| `obtenirEtatPaiement` | `GET /v1/paiements/{reference_interne}` (§5.8) |
+| `obtenirUrlTeleversementPreuve` | `POST /v1/paiements/{paiement_id}/preuve/url` (§5.9) |
+| `declarerPreuveVirement` | `POST /v1/paiements/{paiement_id}/preuve` (§5.10) |
+
+---
+
+## 8) Règles impératives côté API (récapitulatif)
+
+1. **Aucun paiement** à la création ni à l'envoi d'une demande (§5.1–5.4).
+2. **Validation ≠ membre** : `REUSSI` sur les frais d'adhésion ne finalise
+   l'adhésion (`ADHESION_TERMINEE`) qu'après traitement serveur ; les identifiants
+   du nouveau membre partent alors par e-mail.
+3. `REUSSI` **uniquement** sur confirmation externe (webhook Mobile Money ou
+   vérification humaine du virement) + `date_confirmation_serveur`.
+4. Virement : jamais de succès immédiat → `EN_ATTENTE_VERIFICATION_AGENT`.
+5. Liste des opérateurs/modes strictement **dynamique** (désactivé = absent).
+6. `motif_rejet` obligatoire dès que `statut = 'REJETEE'`.
+7. Upload : **20 Mo max**, MIME restreints par bucket, progression/retry gérés
+   par le client, rejeu possible après coupure réseau (Idempotency-Key sur l'envoi).
+8. Délai affiché : `delai_indicatif_heures = 72` (**informatif**, jamais promis).
+9. Âge : `< 15` refus bloquant, `15–17` autorisation parentale exigée,
+   `≥ 18` rien — validé côté serveur (§5.1/§5.4), pas seulement dans l'UI.
+10. Le code de suivi n'est révélé qu'à la création/envoi ; jamais dans les
+    réponses ultérieures (seul `X-Code-Suivi` en en-tête le prouve).
+
+## 9) Branchement et environnement
+
+- `EXPO_PUBLIC_API_BASE_URL` : base de l'API Express ;
+- bascule mock/HTTP : `USE_MOCKS` (implémentations `MockCandidateApi` /
+  `HttpCandidateApi`, même contrat — zéro changement d'UI) ;
+- tous les endpoints répondent JSON ; toute réponse hors contrat (champ manquant,
+  type incohérent) doit produire une erreur `serveur` côté app — **jamais** un
+  écran « prêt » affiché sur des données inconnues ;
+- versions : `/v1` reste stable ; toute rupture de contrat impose `/v2`.
+
+> **Périmètre** : ce contrat couvre uniquement le parcours candidat/visiteur.
+> Le reste (membre connecté) passe par Supabase : `AuthService` (Supabase Auth)
+> et `MemberRepository` (tables `utilisateur`, `membre`, `membre_categorie`,
+> `oeuvre`, `cotisation`, `paiement`, `notification` + buckets `pieces`,
+> `oeuvres`, `preuves`).
