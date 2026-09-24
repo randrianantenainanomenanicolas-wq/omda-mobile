@@ -1,4 +1,18 @@
 # Avancement OMDA Mobile
-- Étape en cours : 0
-- Dernier test OK : —
-- Notes : —
+- Étape en cours : 2
+- Dernier test OK : `npx tsc --noEmit` (0 erreur) + `npx tailwindcss` (11 couleurs + 4 statuts générés) + `npx expo export --platform android` (bundle réussi, tokens présents) — 24/09/2026
+- Notes :
+  - Étape 2 = tokens NativeWind uniquement : aucun écran fonctionnel, aucun composant UI, aucune couche data/services.
+  - Tokens couleur (§5 du cahier des charges) : `omda-green`, `omda-greenDark`, `omda-ochre`, `omda-ochreDark`, `omda-black`, `omda-white`, `omda-warmGray`, `omda-borderGray`, `omda-textGray`, `omda-errorRed`, `omda-infoBlueGray`.
+  - Tokens sémantiques (§6) : `status-success` (= vert OMDA), `status-pending` (= ocre OMDA), `status-error` (= rouge), `status-info` (= bleu-gris).
+  - `src/theme/colors.ts` : source unique de vérité pour l’usage JavaScript (`paletteOmda`, `couleursStatut`, `colors` + types) — consommée directement par `tailwind.config.js`, donc aucun hex dupliqué.
+  - Vérifications : les 11 couleurs + les 4 statuts sont réellement générés par Tailwind et présents dans le bundle Android (valeurs `2e7a46`, `f5f4ef`, classe `omda-warmGray` retrouvées dans le bundle).
+  - Stack : Expo SDK 57.0.24 + React Native 0.86.3 + React 19.2.3 + TypeScript 6.0.3 ; `package.json` → `"main": "expo-router/entry"` et script `npm run typecheck`.
+  - Expo Router : `app/_layout.tsx` (Stack sans en-tête + `StatusBar`) et `app/index.tsx` (écran provisoire de vérification, sans aucun menu). Le `SafeAreaProvider` est déjà fourni par Expo Router.
+  - NativeWind 4.2.7 + Tailwind CSS 3.4 : `tailwind.config.js` (preset `nativewind/preset`, tokens couleur `omda-*` et `status-*` de la palette officielle), `babel.config.js` (`babel-preset-expo` avec `jsxImportSource: "nativewind"` + preset `nativewind/babel`), `metro.config.js` (`withNativeWind(config, { input: './global.css' })`), `global.css`, `nativewind-env.d.ts` (références `expo/types` + `nativewind/types`).
+  - FontAwesome : `@expo/vector-icons`, pack `FontAwesome6` (noms conformes au mapping `fa*` du cahier des charges : `circle-check`, `circle-info`, `clock`, …). Les icônes héritent de la couleur d’un `<Text>` portant un token `status-*`.
+  - Variables d’environnement : `.env.example` créé (`EXPO_PUBLIC_API_BASE_URL`, `EXPO_PUBLIC_SUPABASE_URL`, `EXPO_PUBLIC_SUPABASE_ANON_KEY`, `EXPO_PUBLIC_USE_MOCKS=true`) ; `.env` ignoré par git.
+  - `tailwind.config.js` : `content` = `./app/**`, `./components/**`, `./src/**` (les couleurs ne sont plus écrites en dur dans la config : elles viennent de `src/theme/colors.ts`).
+  - Écran provisoire `app/index.tsx` aligné sur les nouveaux noms de tokens (`bg-omda-warmGray`, `text-omda-textGray`, `border-omda-borderGray`).
+  - Rappel règles : pas de hex dans les composants (uniquement `omda-*` / `status-*`) ; le vert `status-success` = succès confirmé par le serveur uniquement.
+  - Lancement : `npx expo start` (ou `npm start`) puis `a` (Android) / `i` (iOS) — QR code avec Expo Go.
