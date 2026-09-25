@@ -2,7 +2,7 @@ import * as DocumentPicker from 'expo-document-picker';
 import * as ImagePicker from 'expo-image-picker';
 import { router } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Text, View } from 'react-native';
+import { Alert, Text, View } from 'react-native';
 
 import {
   Button,
@@ -282,9 +282,11 @@ function messageEnvoi(envoi: EnvoiFichier, aide: string): string {
  * (règle métier 8 : « 2 œuvres minimum, 1 attestation par œuvre »).
  *
  * Contraintes d'envoi : 20 Mo maximum, types MIME restreints par bucket,
- * progression visible, reprise sur erreur (coupure réseau) et annulation sans
- * perte de la saisie. Les envois passent par `mockCandidateApi.televerserFichier`
- * (même contrat que l'API réelle) et sont affichés par `UploadTile`.
+ * progression visible, reprise sur erreur (coupure réseau), remplacement d'un
+ * fichier déjà envoyé et suppression confirmée tant que la demande n'est pas
+ * envoyée, annulation sans perte de la saisie. Les envois passent par
+ * `mockCandidateApi.televerserFichier` (même contrat que l'API réelle) et sont
+ * affichés par `UploadTile`.
  *
  * Gère les 4 états obligatoires : Loading (brouillon + catégories),
  * Erreur + « Réessayer », Vide (catégorie d'adhésion introuvable) et Contenu.
@@ -701,6 +703,49 @@ export default function DocumentsOeuvresScreen() {
     [envoiDe, selectionner, televerser],
   );
 
+  /**
+   * Remplacement d'un fichier déjà choisi : le sélecteur est rouvert, le nouveau
+   * fichier est contrôlé (20 Mo, type MIME) puis envoyé : le précédent dépôt est
+   * écrasé dans l'état local et dans le brouillon persistant.
+   */
+  const remplacer = useCallback(
+    async (cible: CibleEnvoi) => {
+      if (envoiDe(cible).statut === 'enCours') {
+        return;
+      }
+      await selectionner(cible);
+    },
+    [envoiDe, selectionner],
+  );
+
+  /** Suppression confirmée d'un fichier : la tuile revient à « vide » et le brouillon est mis à jour. */
+  const demanderSuppression = useCallback(
+    (cible: CibleEnvoi, libelle: string) => {
+      const envoi = envoiDe(cible);
+      if (envoi.statut === 'vide' || envoi.statut === 'enCours') {
+        return;
+      }
+
+      Alert.alert(
+        'Supprimer ce fichier ?',
+        `${libelle} sera retiré de votre dossier. Vous pourrez ensuite choisir un autre fichier.`,
+        [
+          { text: 'Annuler', style: 'cancel' },
+          {
+            text: 'Supprimer',
+            style: 'destructive',
+            onPress: () => {
+              // Remise à zéro complète : plus aucune référence au fichier supprimé
+              // (nom, uri, référence de dépôt, progression, message d'erreur).
+              definirEnvoi(cible, { ...ENVOI_VIDE });
+            },
+          },
+        ],
+      );
+    },
+    [definirEnvoi, envoiDe],
+  );
+
   /* ------------------------------------------------------- Œuvres du dossier */
 
   const ajouterOeuvre = useCallback(() => {
@@ -869,6 +914,8 @@ export default function DocumentsOeuvresScreen() {
               message={messageEnvoi(envoi, exigence.aide)}
               onSelectionner={() => void selectionner(cible)}
               onReessayer={() => void reessayer(cible)}
+              onRemplacer={() => void remplacer(cible)}
+              onSupprimer={() => demanderSuppression(cible, `La pièce « ${exigence.libelle} »`)}
             />
           );
         })}
@@ -911,6 +958,13 @@ export default function DocumentsOeuvresScreen() {
                 )}
                 onSelectionner={() => void selectionner({ nature: 'oeuvre', cle: oeuvre.cle })}
                 onReessayer={() => void reessayer({ nature: 'oeuvre', cle: oeuvre.cle })}
+                onRemplacer={() => void remplacer({ nature: 'oeuvre', cle: oeuvre.cle })}
+                onSupprimer={() =>
+                  demanderSuppression(
+                    { nature: 'oeuvre', cle: oeuvre.cle },
+                    `Le fichier de l’œuvre ${index + 1}`,
+                  )
+                }
               />
 
               <UploadTile
@@ -926,6 +980,13 @@ export default function DocumentsOeuvresScreen() {
                 )}
                 onSelectionner={() => void selectionner({ nature: 'attestation', cle: oeuvre.cle })}
                 onReessayer={() => void reessayer({ nature: 'attestation', cle: oeuvre.cle })}
+                onRemplacer={() => void remplacer({ nature: 'attestation', cle: oeuvre.cle })}
+                onSupprimer={() =>
+                  demanderSuppression(
+                    { nature: 'attestation', cle: oeuvre.cle },
+                    `L’attestation de diffusion de l’œuvre ${index + 1}`,
+                  )
+                }
               />
             </View>
 

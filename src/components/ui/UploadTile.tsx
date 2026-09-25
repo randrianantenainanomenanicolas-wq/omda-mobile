@@ -31,12 +31,22 @@ type PropsUploadTile = {
   obligatoire?: boolean;
   onSelectionner?: () => void;
   onReessayer?: () => void;
+  /**
+   * Remplace un fichier déjà choisi : l'appelant rouvre le sélecteur, revérifie
+   * la taille (20 Mo) et relance l'envoi. L'ancien fichier est écrasé.
+   */
+  onRemplacer?: () => void;
+  /** Supprime le fichier choisi : l'appelant demande confirmation puis remet la tuile à vide. */
+  onSupprimer?: () => void;
 };
 
 /**
- * Tuile d'envoi de document : progression, statut et reprise sur erreur.
+ * Tuile d'envoi de document : progression, statut, reprise sur erreur,
+ * remplacement et suppression du fichier choisi.
  * - Limite métier de 20 Mo et coupures réseau gérées par l'appelant (service).
  * - ⚠️ `reussi` (vert) uniquement après confirmation du serveur.
+ * - Pendant l'envoi (`enCours`), « Remplacer » et « Supprimer » sont désactivés :
+ *   un fichier ne peut pas être modifié au milieu d'un téléversement.
  */
 export function UploadTile({
   libelle,
@@ -48,10 +58,14 @@ export function UploadTile({
   obligatoire = false,
   onSelectionner,
   onReessayer,
+  onRemplacer,
+  onSupprimer,
 }: PropsUploadTile) {
   const enCours = statut === 'enCours';
   const valeurProgression = Math.max(0, Math.min(100, Math.round(progression)));
   const description = statut === 'vide' ? null : STATUTS[statut];
+  /** Un fichier existe dès que la tuile n'est plus à l'état « vide ». */
+  const fichierPresent = statut !== 'vide';
 
   return (
     <View className="w-full rounded-xl border border-omda-borderGray bg-omda-white p-4">
@@ -97,6 +111,30 @@ export function UploadTile({
       {statut === 'erreur' && onReessayer ? (
         <View className="mt-3">
           <Button libelle="Réessayer" variante="secondary" onPress={onReessayer} />
+        </View>
+      ) : null}
+
+      {fichierPresent && (onRemplacer || onSupprimer) ? (
+        <View className="mt-3 gap-2">
+          {onRemplacer ? (
+            <Button
+              libelle="Remplacer"
+              variante="secondary"
+              icone="arrows-rotate"
+              desactive={enCours}
+              onPress={onRemplacer}
+            />
+          ) : null}
+
+          {onSupprimer ? (
+            <Button
+              libelle="Supprimer"
+              variante="destructive"
+              icone="trash"
+              desactive={enCours}
+              onPress={onSupprimer}
+            />
+          ) : null}
         </View>
       ) : null}
     </View>
