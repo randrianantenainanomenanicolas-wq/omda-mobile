@@ -2,7 +2,7 @@ import * as DocumentPicker from 'expo-document-picker';
 import * as ImagePicker from 'expo-image-picker';
 import { router } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert, Text, View } from 'react-native';
+import { Text, View } from 'react-native';
 
 import {
   Button,
@@ -718,30 +718,19 @@ export default function DocumentsOeuvresScreen() {
     [envoiDe, selectionner],
   );
 
-  /** Suppression confirmée d'un fichier : la tuile revient à « vide » et le brouillon est mis à jour. */
-  const demanderSuppression = useCallback(
-    (cible: CibleEnvoi, libelle: string) => {
-      const envoi = envoiDe(cible);
-      if (envoi.statut === 'vide' || envoi.statut === 'enCours') {
+  /**
+   * Suppression d'un fichier (déclenchée après la confirmation affichée par
+   * `UploadTile`) : l'élément repasse à l'état « manquant » via une NOUVELLE
+   * valeur immuable, sans aucun champ conservé (fichier local, référence de
+   * dépôt, progression, message d'erreur). Les effets de sauvegarde ci-dessus
+   * réécrivent aussitôt le brouillon `AdhesionDraft` (AsyncStorage).
+   */
+  const supprimer = useCallback(
+    (cible: CibleEnvoi) => {
+      if (envoiDe(cible).statut === 'enCours') {
         return;
       }
-
-      Alert.alert(
-        'Supprimer ce fichier ?',
-        `${libelle} sera retiré de votre dossier. Vous pourrez ensuite choisir un autre fichier.`,
-        [
-          { text: 'Annuler', style: 'cancel' },
-          {
-            text: 'Supprimer',
-            style: 'destructive',
-            onPress: () => {
-              // Remise à zéro complète : plus aucune référence au fichier supprimé
-              // (nom, uri, référence de dépôt, progression, message d'erreur).
-              definirEnvoi(cible, { ...ENVOI_VIDE });
-            },
-          },
-        ],
-      );
+      definirEnvoi(cible, { ...ENVOI_VIDE });
     },
     [definirEnvoi, envoiDe],
   );
@@ -915,7 +904,7 @@ export default function DocumentsOeuvresScreen() {
               onSelectionner={() => void selectionner(cible)}
               onReessayer={() => void reessayer(cible)}
               onRemplacer={() => void remplacer(cible)}
-              onSupprimer={() => demanderSuppression(cible, `La pièce « ${exigence.libelle} »`)}
+              onSupprimer={() => supprimer(cible)}
             />
           );
         })}
@@ -959,12 +948,7 @@ export default function DocumentsOeuvresScreen() {
                 onSelectionner={() => void selectionner({ nature: 'oeuvre', cle: oeuvre.cle })}
                 onReessayer={() => void reessayer({ nature: 'oeuvre', cle: oeuvre.cle })}
                 onRemplacer={() => void remplacer({ nature: 'oeuvre', cle: oeuvre.cle })}
-                onSupprimer={() =>
-                  demanderSuppression(
-                    { nature: 'oeuvre', cle: oeuvre.cle },
-                    `Le fichier de l’œuvre ${index + 1}`,
-                  )
-                }
+                onSupprimer={() => supprimer({ nature: 'oeuvre', cle: oeuvre.cle })}
               />
 
               <UploadTile
@@ -981,12 +965,7 @@ export default function DocumentsOeuvresScreen() {
                 onSelectionner={() => void selectionner({ nature: 'attestation', cle: oeuvre.cle })}
                 onReessayer={() => void reessayer({ nature: 'attestation', cle: oeuvre.cle })}
                 onRemplacer={() => void remplacer({ nature: 'attestation', cle: oeuvre.cle })}
-                onSupprimer={() =>
-                  demanderSuppression(
-                    { nature: 'attestation', cle: oeuvre.cle },
-                    `L’attestation de diffusion de l’œuvre ${index + 1}`,
-                  )
-                }
+                onSupprimer={() => supprimer({ nature: 'attestation', cle: oeuvre.cle })}
               />
             </View>
 

@@ -1,4 +1,5 @@
-import { Text, View } from 'react-native';
+import { useState } from 'react';
+import { Modal, Pressable, Text, View } from 'react-native';
 
 import { Button } from './Button';
 import { Icone, type NomIcone } from './Icone';
@@ -6,6 +7,12 @@ import { StatusPill, type StatutPill } from './StatusPill';
 
 /** États d'un envoi de fichier. */
 export type StatutUpload = 'vide' | 'enCours' | 'verification' | 'reussi' | 'erreur';
+
+/**
+ * Délai laissé au menu « Modifier » pour se fermer avant l'ouverture du
+ * sélecteur natif (évite deux modales natives superposées sur Android).
+ */
+const DELAI_FERMETURE_MODAL_MS = 250;
 
 type DescriptionStatut = {
   pastille: StatutPill;
@@ -41,12 +48,16 @@ type PropsUploadTile = {
 };
 
 /**
- * Tuile d'envoi de document : progression, statut, reprise sur erreur,
- * remplacement et suppression du fichier choisi.
+ * Tuile d'envoi de document : progression, statut, reprise sur erreur et gestion
+ * du fichier choisi (menu « Modifier » → remplacer ou supprimer).
  * - Limite métier de 20 Mo et coupures réseau gérées par l'appelant (service).
  * - ⚠️ `reussi` (vert) uniquement après confirmation du serveur.
- * - Pendant l'envoi (`enCours`), « Remplacer » et « Supprimer » sont désactivés :
- *   un fichier ne peut pas être modifié au milieu d'un téléversement.
+ * - Une seule action visible (« Modifier ») dès qu'un fichier existe ; le reste
+ *   se fait dans une modale (`Modal` React Native, aucune librairie externe) :
+ *   « Remplacer le fichier », « Supprimer le fichier » (avec confirmation) et
+ *   « Annuler ».
+ * - Pendant un envoi (`enCours`), « Modifier » est désactivé : un fichier ne
+ *   peut pas être modifié au milieu d'un téléversement.
  */
 export function UploadTile({
   libelle,
@@ -66,6 +77,33 @@ export function UploadTile({
   const description = statut === 'vide' ? null : STATUTS[statut];
   /** Un fichier existe dès que la tuile n'est plus à l'état « vide ». */
   const fichierPresent = statut !== 'vide';
+
+  const [menuOuvert, setMenuOuvert] = useState(false);
+  const [confirmationSuppression, setConfirmationSuppression] = useState(false);
+
+  const ouvrirMenu = () => {
+    if (enCours) {
+      return;
+    }
+    setConfirmationSuppression(false);
+    setMenuOuvert(true);
+  };
+
+  const fermerMenu = () => {
+    setMenuOuvert(false);
+    setConfirmationSuppression(false);
+  };
+
+  const lancerRemplacement = () => {
+    fermerMenu();
+    setTimeout(() => onRemplacer?.(), DELAI_FERMETURE_MODAL_MS);
+  };
+
+  /** Suppression confirmée : la remise à l'état « manquant » est faite par l'appelant. */
+  const confirmerSuppression = () => {
+    fermerMenu();
+    onSupprimer?.();
+  };
 
   return (
     <View className="w-full rounded-xl border border-omda-borderGray bg-omda-white p-4">
@@ -115,28 +153,88 @@ export function UploadTile({
       ) : null}
 
       {fichierPresent && (onRemplacer || onSupprimer) ? (
-        <View className="mt-3 gap-2">
-          {onRemplacer ? (
-            <Button
-              libelle="Remplacer"
-              variante="secondary"
-              icone="arrows-rotate"
-              desactive={enCours}
-              onPress={onRemplacer}
-            />
-          ) : null}
-
-          {onSupprimer ? (
-            <Button
-              libelle="Supprimer"
-              variante="destructive"
-              icone="trash"
-              desactive={enCours}
-              onPress={onSupprimer}
-            />
-          ) : null}
+        <View className="mt-3">
+          <Button
+            libelle="Modifier"
+            variante="secondary"
+            icone="pen-to-square"
+            desactive={enCours}
+            onPress={ouvrirMenu}
+          />
         </View>
       ) : null}
+
+      <Modal
+        visible={menuOuvert}
+        transparent
+        animationType="fade"
+        statusBarTranslucent
+        onRequestClose={fermerMenu}
+      >
+        <View className="flex-1 items-center justify-center px-5">
+          <Pressable
+            className="absolute bottom-0 left-0 right-0 top-0 bg-omda-black opacity-60"
+            accessibilityRole="button"
+            accessibilityLabel="Fermer la fenêtre"
+            onPress={fermerMenu}
+          />
+
+          <View className="w-full rounded-2xl border border-omda-borderGray bg-omda-white p-5">
+            {confirmationSuppression ? (
+              <View>
+                <Text className="text-lg font-bold text-omda-black">Supprimer ce fichier ?</Text>
+                <Text className="mt-2 text-base text-omda-black">
+                  Vous devrez en ajouter un nouveau avant de continuer.
+                </Text>
+
+                <View className="mt-5 gap-3">
+                  <Button
+                    libelle="Annuler"
+                    variante="secondary"
+                    onPress={() => setConfirmationSuppression(false)}
+                  />
+                  <Button
+                    libelle="Supprimer le fichier"
+                    variante="destructive"
+                    icone="trash"
+                    onPress={confirmerSuppression}
+                  />
+                </View>
+              </View>
+            ) : (
+              <View>
+                <Text className="text-lg font-bold text-omda-black">
+                  {`Gérer « ${libelle} »`}
+                </Text>
+                <Text className="mt-1 text-sm text-omda-textGray">
+                  {nomFichier ?? 'Fichier enregistré dans votre dossier.'}
+                </Text>
+
+                <View className="mt-5 gap-3">
+                  {onRemplacer ? (
+                    <Button
+                      libelle="Remplacer le fichier"
+                      icone="arrows-rotate"
+                      onPress={lancerRemplacement}
+                    />
+                  ) : null}
+
+                  {onSupprimer ? (
+                    <Button
+                      libelle="Supprimer le fichier"
+                      variante="destructive"
+                      icone="trash"
+                      onPress={() => setConfirmationSuppression(true)}
+                    />
+                  ) : null}
+
+                  <Button libelle="Annuler" variante="secondary" onPress={fermerMenu} />
+                </View>
+              </View>
+            )}
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
