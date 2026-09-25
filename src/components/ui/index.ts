@@ -9,6 +9,7 @@ export { LoadingState } from './LoadingState';
 export { ScreenContainer } from './ScreenContainer';
 export { SelectField, type OptionSelect } from './SelectField';
 export { StatusPill, type StatutPill } from './StatusPill';
+export { StepProgress, type DefinitionEtapeAdhesion, type EtapeAdhesionIndex } from './StepProgress';
 export { StepTimeline, type EtapeTimeline, type StatutEtape } from './StepTimeline';
 export { TextField } from './TextField';
 export { UploadTile, type StatutUpload } from './UploadTile';
