@@ -13,7 +13,7 @@ import {
 } from '../src/services/mocks';
 
 /**
- * Vérification d'exécution des mocks (smoke test) : 76 contrôles sur les 4 mocks
+ * Vérification d'exécution des mocks (smoke test) : 77 contrôles sur les 4 mocks
  * + fixtures. Lancer avec `npx --yes tsx tools/verif-mocks.ts` — sortie attendue :
  * `TOUS LES CONTROLES SONT PASSES`.
  */
@@ -243,6 +243,54 @@ async function scenarioSuivi(): Promise<void> {
     nouveau.ok &&
       nouveau.valeur.numero_dossier.startsWith('OMDA-2026-') &&
       nouveau.valeur.code_suivi.length === 9,
+  );
+
+  // Envoi d'un dossier complet : le service confirme numero de dossier + code de
+  // suivi (contrat de l'ecran K -> ecran L, aucun paiement declenche).
+  const brouillonAdulte = nouveau.ok ? nouveau.valeur : null;
+  const soumise = brouillonAdulte
+    ? await mockCandidateApi.soumettreDemande({
+        numero_dossier: brouillonAdulte.numero_dossier,
+        code_suivi: brouillonAdulte.code_suivi,
+        categorie_id: '11111111-1111-4111-8111-111111111111',
+        pieces: [
+          {
+            type: 'PHOTO',
+            chemin_stockage: 'pieces/photo.jpg',
+            mime_type: 'image/jpeg',
+            taille_octets: 120000,
+          },
+          {
+            type: 'CIN',
+            chemin_stockage: 'pieces/cin.pdf',
+            mime_type: 'application/pdf',
+            taille_octets: 240000,
+          },
+          {
+            type: 'ACTE_NAISSANCE',
+            chemin_stockage: 'pieces/acte.pdf',
+            mime_type: 'application/pdf',
+            taille_octets: 180000,
+          },
+          {
+            type: 'CERTIFICAT_RESIDENCE',
+            chemin_stockage: 'pieces/residence.pdf',
+            mime_type: 'application/pdf',
+            taille_octets: 150000,
+          },
+        ],
+        oeuvres: [oeuvreTest('varangue'), oeuvreTest('riziere')],
+      })
+    : null;
+  verifier(
+    'envoi du dossier complet : numéro + code de suivi + statut ENVOYEE + délai 72 h',
+    brouillonAdulte !== null &&
+      soumise !== null &&
+      soumise.ok &&
+      soumise.valeur.numero_dossier === brouillonAdulte.numero_dossier &&
+      soumise.valeur.code_suivi === brouillonAdulte.code_suivi &&
+      soumise.valeur.statut === 'ENVOYEE' &&
+      soumise.valeur.delai_indicatif_heures === 72,
   );
 
   const autorisationParentale = await mockCandidateApi.soumettreDemande({
