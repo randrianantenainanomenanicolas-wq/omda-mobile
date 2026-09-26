@@ -12,6 +12,7 @@ import type {
   OperateurMobileMoney,
   OperateurPaiement,
   Paiement,
+  StatutAdhesionCategorie,
   StatutPaiement,
   TailleOctets,
   TypeMime,
@@ -337,6 +338,35 @@ export function categoriesDuMembre(membreId: UUID): MembreCategorie[] {
   return membreCategoriesMock.filter((element) => element.membre_id === membreId);
 }
 
+/**
+ * Ajoute une appartenance membre ↔ catégorie (« serveur » simulé), comme le
+ * ferait le back-office à la réception d'une demande de catégorie supplémentaire
+ * (règle métier 9) : unicité `UNIQUE (membre_id, categorie_id)` respectée par
+ * l'appelant.
+ *
+ * La demande reste au statut `EN_ATTENTE` jusqu'à la décision d'un agent OMDA ;
+ * `date_activation` porte alors la date d'envoi de la demande (champ non null
+ * dans le schéma) et sera remplacée par l'horodatage d'activation.
+ * Persistance en mémoire : comme le reste de l'état membre des mocks, la
+ * demande survit aux navigations pendant toute la session.
+ */
+export function ajouterAppartenanceCategorie(entree: {
+  membre_id: UUID;
+  categorie_id: UUID;
+  statut: StatutAdhesionCategorie;
+}): MembreCategorie {
+  const appartenance: MembreCategorie = {
+    id: prochainIdentifiantCategorieMembre(),
+    membre_id: entree.membre_id,
+    categorie_id: entree.categorie_id,
+    demande_adhesion_id: null,
+    statut: entree.statut,
+    date_activation: maintenantISO(),
+  };
+  membreCategoriesMock.push(appartenance);
+  return appartenance;
+}
+
 /** Utilisateur de la session courante (`null` si personne n'est connecté). */
 export function utilisateurCourant(): Utilisateur | null {
   return sessionMock.courante ? sessionMock.courante.utilisateur : null;
@@ -388,6 +418,7 @@ export const compteursMock = {
   paiement_membre: 801,
   oeuvre: 0,
   notification: 0,
+  categorie_membre: 0,
 };
 
 /** Numéro attribué au prochain dossier créé (`OMDA-2026-000008`, …). */
@@ -664,6 +695,12 @@ export function prochainIdentifiantOeuvre(): UUID {
 export function prochainIdentifiantNotification(): UUID {
   compteursMock.notification += 1;
   return identifiantIncremental('e1', compteursMock.notification);
+}
+
+/** Identifiant de la prochaine appartenance (`membre_categorie`) créée. */
+export function prochainIdentifiantCategorieMembre(): UUID {
+  compteursMock.categorie_membre += 1;
+  return identifiantIncremental('e2', compteursMock.categorie_membre);
 }
 
 /**

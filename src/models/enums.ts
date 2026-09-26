@@ -18,7 +18,14 @@ export type RoleUtilisateur = (typeof ROLES_UTILISATEUR)[number];
 export const STATUTS_UTILISATEUR = ['ACTIF', 'DESACTIVE', 'EN_ATTENTE_CHANGEMENT_MDP'] as const;
 export type StatutUtilisateur = (typeof STATUTS_UTILISATEUR)[number];
 
-export const STATUTS_ADHESION_CATEGORIE = ['ACTIVE', 'INACTIVE'] as const;
+/**
+ * Statut d'une appartenance membre ↔ catégorie (`membre_categorie.statut`).
+ *
+ * `EN_ATTENTE` : demande de catégorie supplémentaire envoyée depuis l'application
+ * (règle métier 9), en attente de la décision d'un agent OMDA ; aucune validation
+ * n'est faite localement.
+ */
+export const STATUTS_ADHESION_CATEGORIE = ['ACTIVE', 'EN_ATTENTE', 'INACTIVE'] as const;
 export type StatutAdhesionCategorie = (typeof STATUTS_ADHESION_CATEGORIE)[number];
 
 /* ------------------------------------------------------------------- Demandes */

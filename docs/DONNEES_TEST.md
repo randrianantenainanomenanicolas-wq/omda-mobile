@@ -2,7 +2,7 @@
 
 - Source unique : `src/services/mocks/donneesTestMock.ts` (fixtures fixes, réalistes, reproductibles).
 - Activation : `EXPO_PUBLIC_USE_MOCKS=true` (voir `.env.example`).
-- Vérification automatisée : `npx --yes tsx tools/verif-mocks.ts` → `TOUS LES CONTROLES SONT PASSES` (76 contrôles sur les 4 mocks).
+- Vérification automatisée : `npx --yes tsx tools/verif-mocks.ts` → `TOUS LES CONTROLES SONT PASSES` (84 contrôles sur les 4 mocks).
 
 Aucun montant / catégorie / opérateur n'est codé en dur dans l'UI : tout vient d'un service (mock aujourd'hui, serveur demain).
 
@@ -96,5 +96,5 @@ Défauts : `polls_avant_statut_final = 2` (poll 1 → `EN_ATTENTE_CONFIRMATION`,
 
 ## Scénarios couverts par le smoke test
 
-`npx --yes tsx tools/verif-mocks.ts` exécute 76 contrôles : contenus publics (listes dynamiques, tarifs, estimation), suivi des dossiers (numéro + code, timeline, rejet motivé), création/brouillon (âge, autorisation parentale, 2 œuvres minimum), paiement Mobile Money (machine à états + numéros ci-dessus), virement (preuve → agent), pannes et délais (`configMock`), puis l'espace membre (connexion, profil, tableau de bord, œuvres, cotisation → `PAYEE` + notification, notifications lues, états vides, comptes désactivé et bloqué, mot de passe oublié non révélateur, déconnexion).
+`npx --yes tsx tools/verif-mocks.ts` exécute 84 contrôles : contenus publics (listes dynamiques, tarifs, estimation), suivi des dossiers (numéro + code, timeline, rejet motivé), création/brouillon (âge, autorisation parentale, 2 œuvres minimum), paiement Mobile Money (machine à états + numéros ci-dessus), virement (preuve → agent), pannes et délais (`configMock`), puis l'espace membre (connexion, profil, tableau de bord, œuvres, cotisation → `PAYEE` + notification, notifications lues, états vides, comptes désactivé et bloqué, mot de passe oublié non révélateur, déconnexion) et les catégories multiples (règle métier 9 : 1 appartenance ACTIVE au départ, demande de catégorie supplémentaire créée `EN_ATTENTE` sans activation locale, refus `CATEGORIE_DEJA_DEMANDEE` / `CATEGORIE_DEJA_ENREGISTREE` / `CATEGORIE_INDISPONIBLE`, profil final avec 2 catégories dont 1 en attente).
 

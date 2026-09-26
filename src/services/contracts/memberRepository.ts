@@ -38,6 +38,21 @@ export interface MemberRepository {
   /** Profil complet : utilisateur + membre + catégories actives. */
   obtenirProfil(): Promise<Result<ProfilMembre>>;
 
+  /**
+   * Catégories du membre connecté et statut de chaque appartenance
+   * (`membre_categorie`), statuts `ACTIVE` / `EN_ATTENTE` / `INACTIVE`.
+   * Permet notamment d'exclure les catégories déjà présentes du formulaire
+   * « Demander une catégorie supplémentaire ».
+   */
+  listerCategoriesMembre(): Promise<Result<CategoriesMembre>>;
+
+  /**
+   * Demande l'ajout d'une catégorie supplémentaire (règle métier 9).
+   * L'appartenance est créée au statut `EN_ATTENTE` : seul un agent OMDA
+   * décidera de son activation ; aucune validation n'est faite localement.
+   */
+  demanderCategorieSupplementaire(categorie_id: UUID): Promise<Result<MembreCategorie>>;
+
   /** Met à jour les informations modifiables par le membre. */
   mettreAJourProfil(entree: MiseAJourProfilEntree): Promise<Result<ProfilMembre>>;
 
@@ -111,6 +126,16 @@ export type ProfilMembre = {
   utilisateur: Utilisateur;
   membre: Membre;
   /** Catégories du membre (principale + supplémentaires). */
+  categories: Categorie[];
+  membre_categories: MembreCategorie[];
+};
+
+/**
+ * Catégories d'un membre et statut de chaque appartenance (`membre_categorie`).
+ * Renvoyé par `listerCategoriesMembre()` : l'écran « Demander une catégorie »
+ * en déduit les catégories déjà présentes dans le profil à exclure du choix.
+ */
+export type CategoriesMembre = {
   categories: Categorie[];
   membre_categories: MembreCategorie[];
 };
@@ -202,6 +227,9 @@ export const CODES_ERREUR_MEMBRE = {
   OPERATEUR_INDISPONIBLE: 'OPERATEUR_INDISPONIBLE',
   FICHIER_TROP_VOLUMINEUX: 'FICHIER_TROP_VOLUMINEUX',
   TYPE_FICHIER_NON_AUTORISE: 'TYPE_FICHIER_NON_AUTORISE',
+  CATEGORIE_INDISPONIBLE: 'CATEGORIE_INDISPONIBLE',
+  CATEGORIE_DEJA_ENREGISTREE: 'CATEGORIE_DEJA_ENREGISTREE',
+  CATEGORIE_DEJA_DEMANDEE: 'CATEGORIE_DEJA_DEMANDEE',
 } as const;
 
 export type CodeErreurMembre = (typeof CODES_ERREUR_MEMBRE)[keyof typeof CODES_ERREUR_MEMBRE];

@@ -13,7 +13,7 @@ import {
 } from '../src/services/mocks';
 
 /**
- * Vérification d'exécution des mocks (smoke test) : 77 contrôles sur les 4 mocks
+ * Vérification d'exécution des mocks (smoke test) : 84 contrôles sur les 4 mocks
  * + fixtures. Lancer avec `npx --yes tsx tools/verif-mocks.ts` — sortie attendue :
  * `TOUS LES CONTROLES SONT PASSES`.
  */
@@ -659,6 +659,84 @@ async function scenarioMembreConnexion(): Promise<void> {
   );
 }
 
+/**
+ * Règle métier 9 — catégories multiples : appartenance unique, demande de
+ * catégorie supplémentaire au statut `EN_ATTENTE` et refus des doublons.
+ * S'exécute avec la session `membre@omda.mg` encore ouverte (1 catégorie ACTIVE).
+ */
+async function scenarioMembreCategories(): Promise<void> {
+  const depart = await mockMemberRepository.listerCategoriesMembre();
+  verifier(
+    'catégories du membre : 1 appartenance ACTIVE au départ',
+    depart.ok &&
+      depart.valeur.categories.length === 1 &&
+      depart.valeur.membre_categories.length === 1 &&
+      depart.valeur.membre_categories[0].statut === 'ACTIVE',
+  );
+
+  // Écrivain : catégorie active et absente du profil.
+  const demande = await mockMemberRepository.demanderCategorieSupplementaire(
+    '22222222-2222-4222-8222-222222222222',
+  );
+  verifier(
+    'demande de catégorie supplémentaire -> EN_ATTENTE (aucune activation locale)',
+    demande.ok &&
+      demande.valeur.statut === 'EN_ATTENTE' &&
+      demande.valeur.categorie_id === '22222222-2222-4222-8222-222222222222' &&
+      demande.valeur.date_activation.length > 0,
+  );
+
+  const apresDemande = await mockMemberRepository.listerCategoriesMembre();
+  verifier(
+    'après demande : 2 catégories (1 ACTIVE + 1 EN_ATTENTE)',
+    apresDemande.ok &&
+      apresDemande.valeur.categories.length === 2 &&
+      apresDemande.valeur.membre_categories.filter(
+        (element) => element.statut === 'EN_ATTENTE',
+      ).length === 1,
+  );
+
+  const doublon = await mockMemberRepository.demanderCategorieSupplementaire(
+    '22222222-2222-4222-8222-222222222222',
+  );
+  verifier(
+    'seconde demande pour la même catégorie -> CATEGORIE_DEJA_DEMANDEE',
+    !doublon.ok &&
+      doublon.erreur.type === 'metier' &&
+      doublon.erreur.code === 'CATEGORIE_DEJA_DEMANDEE',
+  );
+
+  const dejaRattachee = await mockMemberRepository.demanderCategorieSupplementaire(
+    '11111111-1111-4111-8111-111111111111',
+  );
+  verifier(
+    'catégorie déjà ACTIVE au profil -> CATEGORIE_DEJA_ENREGISTREE',
+    !dejaRattachee.ok &&
+      dejaRattachee.erreur.type === 'metier' &&
+      dejaRattachee.erreur.code === 'CATEGORIE_DEJA_ENREGISTREE',
+  );
+
+  const inactive = await mockMemberRepository.demanderCategorieSupplementaire(
+    '44444444-4444-4444-8444-444444444444',
+  );
+  verifier(
+    'catégorie désactivée -> CATEGORIE_INDISPONIBLE',
+    !inactive.ok &&
+      inactive.erreur.type === 'metier' &&
+      inactive.erreur.code === 'CATEGORIE_INDISPONIBLE',
+  );
+
+  const profilApres = await mockMemberRepository.obtenirProfil();
+  verifier(
+    'profil final : 2 catégories (dont 1 « Demande en attente »)',
+    profilApres.ok &&
+      profilApres.valeur.categories.length === 2 &&
+      profilApres.valeur.membre_categories.some(
+        (element) => element.statut === 'EN_ATTENTE',
+      ),
+  );
+}
+
 async function scenarioMembreCotisation(): Promise<void> {
   const cotisations = await mockMemberRepository.listerCotisations({ annee: 2026 });
   verifier(
@@ -854,6 +932,7 @@ async function scenarioMembreComptes(): Promise<void> {
 /** Espace membre : connexion + données, cotisation + notifications, comptes de test. */
 async function scenarioMembre(): Promise<void> {
   await scenarioMembreConnexion();
+  await scenarioMembreCategories();
   await scenarioMembreCotisation();
   await scenarioMembreComptes();
 }

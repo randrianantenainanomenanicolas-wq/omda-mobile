@@ -1,5 +1,5 @@
-import { router } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
+import { router, useFocusEffect } from 'expo-router';
+import { useCallback, useRef, useState } from 'react';
 import { Text, View } from 'react-native';
 
 import {
@@ -25,7 +25,7 @@ import { mockMemberRepository } from '../../../src/services/mocks';
 
 /**
  * États de l'écran. `vide` = profil chargé mais aucune catégorie d'adhésion :
- * la section « Catégories » affiche alors un `EmptyState` (le profil lui-même
+ * la section « Mes catégories » affiche alors un `EmptyState` (le profil lui-même
  * n'est jamais vide).
  */
 type EtatEcran = 'chargement' | 'erreur' | 'vide' | 'contenu';
@@ -40,6 +40,7 @@ const STATUTS_COMPTE: Record<StatutUtilisateur, { variante: StatutPill; libelle:
 /** Statut de l'appartenance du membre à une catégorie (`membre_categorie.statut`). */
 const STATUTS_CATEGORIE: Record<StatutAdhesionCategorie, { variante: StatutPill; libelle: string }> = {
   ACTIVE: { variante: 'success', libelle: 'Catégorie active' },
+  EN_ATTENTE: { variante: 'pending', libelle: 'Demande en attente' },
   INACTIVE: { variante: 'info', libelle: 'Catégorie inactive' },
 };
 
@@ -75,6 +76,18 @@ function formaterDateHeure(dateIso: string | null): string {
 function formaterDateCourte(dateIso: string | null): string {
   const complet = formaterDateHeure(dateIso);
   return complet ? complet.split(' à ')[0] : '';
+}
+
+/**
+ * Phrase de statut horodatée sous chaque catégorie : activation datée, demande
+ * récente (règle métier 9) ou simple enregistrement.
+ */
+function phraseCategorie(statut: StatutAdhesionCategorie | undefined, date: string): string {
+  if (statut === 'ACTIVE') return `Membre de cette catégorie depuis le ${date}.`;
+  if (statut === 'EN_ATTENTE') {
+    return `Demande envoyée le ${date} : en attente de la décision d’un agent OMDA.`;
+  }
+  return `Catégorie enregistrée le ${date}.`;
 }
 
 /** Numéro de téléphone au format international (+261 + 9 chiffres), comme à l'adhésion. */
@@ -131,6 +144,10 @@ function TitreSection({ icone, titre, mention }: PropsTitreSection) {
  * le numéro de téléphone (`mettreAJourProfil`) — le nom, le prénom, le CIN et la
  * date de naissance viennent du dossier candidat et restent en lecture seule.
  *
+ * Section « Mes catégories » (règle métier 9) : toutes les catégories du membre
+ * avec leur statut (`ACTIVE`, `EN_ATTENTE`, `INACTIVE`) et accès à l'écran
+ * `/(membre)/demander-categorie` pour demander une catégorie supplémentaire.
+ *
  * États obligatoires : `LoadingState`, `ErrorState` + « Réessayer », `EmptyState`
  * (aucune catégorie) et contenu normal.
  */
@@ -144,29 +161,53 @@ export default function ProfilScreen() {
   const [messageSucces, setMessageSucces] = useState<string | null>(null);
   const [erreurEnregistrement, setErreurEnregistrement] = useState<string | null>(null);
 
-  const chargerProfil = useCallback(async () => {
-    setEtat('chargement');
-    setMessageErreur('');
-    setMessageSucces(null);
-    setErreurEnregistrement(null);
-    setErreurTelephone(undefined);
+  const chargerProfil = useCallback(async (options?: { silencieux?: boolean }) => {
+    const silencieux = options?.silencieux === true;
+    if (!silencieux) {
+      setEtat('chargement');
+      setMessageErreur('');
+      setMessageSucces(null);
+      setErreurEnregistrement(null);
+      setErreurTelephone(undefined);
+    }
 
     const resultat = await mockMemberRepository.obtenirProfil();
 
     if (!resultat.ok) {
+      if (silencieux) {
+        // Rechargement silencieux (retour d'un autre écran) : l'affichage
+        // actuel est conservé ; « Actualiser le profil » permet de réessayer.
+        return;
+      }
       setMessageErreur(traduireErreur(resultat.erreur));
       setEtat('erreur');
       return;
     }
 
     setProfil(resultat.valeur);
-    setTelephoneSaisi(resultat.valeur.utilisateur.telephone ?? '');
+    if (!silencieux) {
+      setTelephoneSaisi(resultat.valeur.utilisateur.telephone ?? '');
+    }
+    setMessageErreur('');
     setEtat(resultat.valeur.categories.length === 0 ? 'vide' : 'contenu');
   }, []);
 
-  useEffect(() => {
-    void chargerProfil();
-  }, [chargerProfil]);
+  /**
+   * Premier focus ⇒ chargement complet ; focus suivants (retour d'un autre
+   * écran, changement d'onglet) ⇒ rechargement silencieux, pour afficher une
+   * éventuelle « Demande en attente » créée depuis `/(membre)/demander-categorie`.
+   */
+  const premierFocus = useRef(true);
+  useFocusEffect(
+    useCallback(() => {
+      if (premierFocus.current) {
+        premierFocus.current = false;
+        void chargerProfil();
+        return;
+      }
+      void chargerProfil({ silencieux: true });
+    }, [chargerProfil]),
+  );
 
   const enregistrerTelephone = useCallback(async () => {
     const erreur = validerTelephone(telephoneSaisi);
@@ -345,12 +386,12 @@ export default function ProfilScreen() {
         </View>
       </View>
 
-      {/* ------------------------------- Catégories ------------------------------- */}
+      {/* ------------------------------ Mes catégories ------------------------------ */}
       <View className="mt-4 w-full rounded-2xl border border-omda-borderGray bg-omda-white p-5">
         <TitreSection
-          icone="list-check"
-          titre="Catégories d’adhésion"
-          mention="Catégories associées à votre profil (lecture seule)."
+          icone="layer-group"
+          titre="Mes catégories"
+          mention="Toutes vos catégories d’adhésion et l’état de chaque demande."
         />
 
         <View className="mt-4">
@@ -399,9 +440,7 @@ export default function ProfilScreen() {
 
                     {dateActivation ? (
                       <Text className="mt-2 text-sm text-omda-textGray">
-                        {appartenance?.statut === 'ACTIVE'
-                          ? `Membre de cette catégorie depuis le ${dateActivation}.`
-                          : `Catégorie enregistrée le ${dateActivation}.`}
+                        {phraseCategorie(appartenance?.statut, dateActivation)}
                       </Text>
                     ) : null}
                   </View>
@@ -409,6 +448,22 @@ export default function ProfilScreen() {
               })}
             </View>
           )}
+        </View>
+
+        <View className="mt-4 border-t border-omda-borderGray pt-4">
+          <Text className="text-sm text-omda-textGray">
+            Une catégorie supplémentaire se demande depuis cet écran : votre
+            demande reste « en attente » jusqu’à la décision d’un agent OMDA.
+          </Text>
+
+          <View className="mt-3">
+            <Button
+              libelle="Demander une catégorie supplémentaire"
+              icone="circle-plus"
+              pleineLargeur
+              onPress={() => router.push('/(membre)/demander-categorie')}
+            />
+          </View>
         </View>
       </View>
 

@@ -1,6 +1,7 @@
-import type { Categorie, Cotisation, Membre, Notification, Oeuvre, Paiement, UUID, Utilisateur } from '../../models';
+import type { Categorie, Cotisation, Membre, MembreCategorie, Notification, Oeuvre, Paiement, UUID, Utilisateur } from '../../models';
 import { CODE_DEVISE_MGA } from '../../models';
 import type {
+  CategoriesMembre,
   CreerOeuvreEntree,
   FichierTeleverse,
   InitierPaiementMembreEntree,
@@ -27,6 +28,7 @@ import {
 } from '../contracts';
 import { CATEGORIES_TEST, tarifApplique } from './donneesTestMock';
 import {
+  ajouterAppartenanceCategorie,
   appliquerEffetsPaiementReussi,
   avancerPaiement,
   candidatParUtilisateur,
@@ -74,8 +76,8 @@ function sessionRequise(): ResultErr {
   );
 }
 
-/** Profil complet (utilisateur + membre + catégories) d'un contexte donné. */
-function profilDepuisContexte(contexte: ContexteMembre): ProfilMembre {
+/** Catégories du membre (référentiel + statut de chaque appartenance) d'un contexte. */
+function categoriesDepuisContexte(contexte: ContexteMembre): CategoriesMembre {
   const appartenances = categoriesDuMembre(contexte.membre.id);
   const categories = appartenances
     .map(
@@ -85,10 +87,17 @@ function profilDepuisContexte(contexte: ContexteMembre): ProfilMembre {
     .filter((categorie): categorie is Categorie => categorie !== null);
 
   return {
-    utilisateur: contexte.utilisateur,
-    membre: contexte.membre,
     categories,
     membre_categories: appartenances,
+  };
+}
+
+/** Profil complet (utilisateur + membre + catégories) d'un contexte donné. */
+function profilDepuisContexte(contexte: ContexteMembre): ProfilMembre {
+  return {
+    utilisateur: contexte.utilisateur,
+    membre: contexte.membre,
+    ...categoriesDepuisContexte(contexte),
   };
 }
 
@@ -117,6 +126,69 @@ export class MockMemberRepository implements MemberRepository {
       return sessionRequise();
     }
     return ok(profilDepuisContexte(contexte));
+  }
+
+  /** Catégories du membre : référentiel du profil + statut de chaque appartenance. */
+  async listerCategoriesMembre(): Promise<Result<CategoriesMembre>> {
+    const panne = await preparerAppelMock();
+    if (panne) {
+      return panne;
+    }
+    const contexte = contexteMembre();
+    if (!contexte) {
+      return sessionRequise();
+    }
+    return ok(categoriesDepuisContexte(contexte));
+  }
+
+  /**
+   * Demande de catégorie supplémentaire (règle métier 9) : la catégorie doit
+   * être active au référentiel et ne pas déjà figurer au profil (dans aucun
+   * statut). L'appartenance est créée au statut `EN_ATTENTE` : seul un agent
+   * OMDA décidera de son activation (aucune validation locale).
+   */
+  async demanderCategorieSupplementaire(categorie_id: UUID): Promise<Result<MembreCategorie>> {
+    const panne = await preparerAppelMock();
+    if (panne) {
+      return panne;
+    }
+    const contexte = contexteMembre();
+    if (!contexte) {
+      return sessionRequise();
+    }
+
+    const categorie = CATEGORIES_TEST.find(
+      (element) => element.id === categorie_id && element.actif,
+    );
+    if (!categorie) {
+      return erreurMetier(
+        CODES_ERREUR_MEMBRE.CATEGORIE_INDISPONIBLE,
+        'Cette catégorie n’est pas proposée actuellement.',
+      );
+    }
+
+    const existante = categoriesDuMembre(contexte.membre.id).find(
+      (appartenance) => appartenance.categorie_id === categorie_id,
+    );
+    if (existante) {
+      return existante.statut === 'EN_ATTENTE'
+        ? erreurMetier(
+            CODES_ERREUR_MEMBRE.CATEGORIE_DEJA_DEMANDEE,
+            'Une demande est déjà en attente pour cette catégorie.',
+          )
+        : erreurMetier(
+            CODES_ERREUR_MEMBRE.CATEGORIE_DEJA_ENREGISTREE,
+            'Cette catégorie figure déjà dans votre profil.',
+          );
+    }
+
+    return ok(
+      ajouterAppartenanceCategorie({
+        membre_id: contexte.membre.id,
+        categorie_id,
+        statut: 'EN_ATTENTE',
+      }),
+    );
   }
 
   /** Seul le téléphone est modifiable par le membre (le reste vient du dossier). */
