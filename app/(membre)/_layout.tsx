@@ -6,11 +6,13 @@ import { useAuth } from '../../src/context/AuthContext';
 /**
  * Espace membre : Stack interne contenant les onglets `(tabs)`
  * (Accueil, Œuvres, Cotisation, Profil, Notifications) et les écrans
- * hors onglets `depot-oeuvre` et `fiche-oeuvre`.
+ * hors onglets `depot-oeuvre`, `fiche-oeuvre` et `deconnexion`.
  * C'est le SEUL espace de l'application à afficher une TabBar.
  *
  * Garde de navigation :
- * - non connecté => redirection vers `/(public)/connexion`
+ * - non connecté => retour à l'accueil PUBLIC `/(public)/accueil` (sans menu) :
+ *   cela couvre l'accès direct sans session ET la fin de session demandée depuis
+ *   l'écran `deconnexion` (règle métier W : retour à l'accueil public).
  * - connecté avec `doit_changer_mot_de_passe = true` => redirection bloquante vers `/(auth-required)/changer-mot-de-passe`
  * - connecté avec mot de passe valide => autorise l'accès à l'espace membre.
  */
@@ -22,7 +24,7 @@ export default function MembreLayout() {
   }
 
   if (!estConnecte) {
-    return <Redirect href="/(public)/connexion" />;
+    return <Redirect href="/(public)/accueil" />;
   }
 
   if (doitChangerMotDePasse) {

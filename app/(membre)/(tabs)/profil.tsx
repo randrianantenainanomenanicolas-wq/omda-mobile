@@ -1,33 +1,432 @@
 import { router } from 'expo-router';
+import { useCallback, useEffect, useState } from 'react';
 import { Text, View } from 'react-native';
 
-import { Button, ScreenContainer } from '../../../src/components/ui';
+import {
+  Button,
+  EmptyState,
+  ErrorState,
+  Icone,
+  InfoBanner,
+  LoadingState,
+  ScreenContainer,
+  StatusPill,
+  TextField,
+  type NomIcone,
+  type StatutPill,
+} from '../../../src/components/ui';
+import type {
+  RoleUtilisateur,
+  StatutAdhesionCategorie,
+  StatutUtilisateur,
+} from '../../../src/models';
+import type { ErreurApp, ProfilMembre } from '../../../src/services/contracts';
+import { mockMemberRepository } from '../../../src/services/mocks';
 
 /**
- * Profil (squelette d'étape 4, onglet 4/5) : infos utilisateur + membre +
- * catégories, distinction modifiable / lecture seule.
- * Déconnexion : confirmation puis retour à l’accueil public sans menu
- * (règle métier W).
+ * États de l'écran. `vide` = profil chargé mais aucune catégorie d'adhésion :
+ * la section « Catégories » affiche alors un `EmptyState` (le profil lui-même
+ * n'est jamais vide).
+ */
+type EtatEcran = 'chargement' | 'erreur' | 'vide' | 'contenu';
+
+/** Statuts de compte affichables (cahier des charges §6). */
+const STATUTS_COMPTE: Record<StatutUtilisateur, { variante: StatutPill; libelle: string }> = {
+  ACTIF: { variante: 'success', libelle: 'Compte actif' },
+  DESACTIVE: { variante: 'error', libelle: 'Compte désactivé' },
+  EN_ATTENTE_CHANGEMENT_MDP: { variante: 'pending', libelle: 'Mot de passe à renouveler' },
+};
+
+/** Statut de l'appartenance du membre à une catégorie (`membre_categorie.statut`). */
+const STATUTS_CATEGORIE: Record<StatutAdhesionCategorie, { variante: StatutPill; libelle: string }> = {
+  ACTIVE: { variante: 'success', libelle: 'Catégorie active' },
+  INACTIVE: { variante: 'info', libelle: 'Catégorie inactive' },
+};
+
+/** Libellés lisibles des rôles (`ROLES_UTILISATEUR`). */
+const LIBELLES_ROLE: Record<RoleUtilisateur, string> = {
+  MEMBRE: 'Membre',
+  AGENT: 'Agent OMDA',
+  ADMINISTRATEUR: 'Administrateur',
+};
+
+/** Message compréhensible selon la famille d'erreur (`Result`). */
+function traduireErreur(erreur: ErreurApp): string {
+  if (erreur.type === 'metier') return erreur.message;
+  if (erreur.type === 'reseau') {
+    return 'Impossible de joindre le serveur OMDA. Vérifiez votre connexion Internet puis réessayez.';
+  }
+  return 'Votre profil est momentanément indisponible. Veuillez réessayer dans quelques instants.';
+}
+
+/** Horodatage affiché en `JJ/MM/AAAA à HH:MM` (formatage manuel, sans `Intl`). */
+function formaterDateHeure(dateIso: string | null): string {
+  if (!dateIso) return '';
+  const date = new Date(dateIso);
+  if (Number.isNaN(date.getTime())) return '';
+  const jour = String(date.getDate()).padStart(2, '0');
+  const mois = String(date.getMonth() + 1).padStart(2, '0');
+  const heures = String(date.getHours()).padStart(2, '0');
+  const minutes = String(date.getMinutes()).padStart(2, '0');
+  return `${jour}/${mois}/${date.getFullYear()} à ${heures}:${minutes}`;
+}
+
+/** Date affichée en `JJ/MM/AAAA`. */
+function formaterDateCourte(dateIso: string | null): string {
+  const complet = formaterDateHeure(dateIso);
+  return complet ? complet.split(' à ')[0] : '';
+}
+
+/** Numéro de téléphone au format international (+261 + 9 chiffres), comme à l'adhésion. */
+function validerTelephone(valeur: string): string | undefined {
+  const propre = valeur.replace(/\s+/g, '');
+  if (!propre || propre === '+261') return 'Le numéro de téléphone est obligatoire.';
+  if (!propre.startsWith('+261')) return 'Le numéro doit commencer par l’indicatif +261.';
+  if (propre.length < 13) return 'Numéro incomplet : 9 chiffres requis après +261.';
+  return undefined;
+}
+
+type PropsLigneInfo = {
+  libelle: string;
+  valeur: string;
+  icone?: NomIcone;
+};
+
+/** Ligne d'information NON modifiable (libellé + valeur). */
+function LigneInfo({ libelle, valeur, icone = 'lock' }: PropsLigneInfo) {
+  return (
+    <View className="w-full flex-row items-start rounded-xl border border-omda-borderGray bg-omda-warmGray p-4">
+      <Icone nom={icone} taille={14} classeCouleur="text-omda-textGray" />
+      <View className="ml-3 flex-1">
+        <Text className="text-sm text-omda-textGray">{libelle}</Text>
+        <Text className="mt-1 text-base font-semibold text-omda-black">{valeur}</Text>
+      </View>
+    </View>
+  );
+}
+
+type PropsTitreSection = {
+  icone: NomIcone;
+  titre: string;
+  mention: string;
+};
+
+/** Titre de section : rappelle systématiquement si la section est modifiable ou non. */
+function TitreSection({ icone, titre, mention }: PropsTitreSection) {
+  return (
+    <View className="flex-row items-start">
+      <Icone nom={icone} taille={18} classeCouleur="text-omda-black" />
+      <View className="ml-3 flex-1">
+        <Text className="text-lg font-bold text-omda-black">{titre}</Text>
+        <Text className="mt-1 text-sm text-omda-textGray">{mention}</Text>
+      </View>
+    </View>
+  );
+}
+
+/**
+ * Profil du membre (écran U du cahier des charges).
+ *
+ * Données : `mockMemberRepository.obtenirProfil()` ; le SEUL champ modifiable est
+ * le numéro de téléphone (`mettreAJourProfil`) — le nom, le prénom, le CIN et la
+ * date de naissance viennent du dossier candidat et restent en lecture seule.
+ *
+ * États obligatoires : `LoadingState`, `ErrorState` + « Réessayer », `EmptyState`
+ * (aucune catégorie) et contenu normal.
  */
 export default function ProfilScreen() {
+  const [etat, setEtat] = useState<EtatEcran>('chargement');
+  const [profil, setProfil] = useState<ProfilMembre | null>(null);
+  const [messageErreur, setMessageErreur] = useState('');
+  const [telephoneSaisi, setTelephoneSaisi] = useState('');
+  const [erreurTelephone, setErreurTelephone] = useState<string | undefined>(undefined);
+  const [enregistrement, setEnregistrement] = useState(false);
+  const [messageSucces, setMessageSucces] = useState<string | null>(null);
+  const [erreurEnregistrement, setErreurEnregistrement] = useState<string | null>(null);
+
+  const chargerProfil = useCallback(async () => {
+    setEtat('chargement');
+    setMessageErreur('');
+    setMessageSucces(null);
+    setErreurEnregistrement(null);
+    setErreurTelephone(undefined);
+
+    const resultat = await mockMemberRepository.obtenirProfil();
+
+    if (!resultat.ok) {
+      setMessageErreur(traduireErreur(resultat.erreur));
+      setEtat('erreur');
+      return;
+    }
+
+    setProfil(resultat.valeur);
+    setTelephoneSaisi(resultat.valeur.utilisateur.telephone ?? '');
+    setEtat(resultat.valeur.categories.length === 0 ? 'vide' : 'contenu');
+  }, []);
+
+  useEffect(() => {
+    void chargerProfil();
+  }, [chargerProfil]);
+
+  const enregistrerTelephone = useCallback(async () => {
+    const erreur = validerTelephone(telephoneSaisi);
+    setErreurTelephone(erreur);
+    if (erreur) {
+      setMessageSucces(null);
+      return;
+    }
+
+    setEnregistrement(true);
+    setMessageSucces(null);
+    setErreurEnregistrement(null);
+
+    const resultat = await mockMemberRepository.mettreAJourProfil({
+      telephone: telephoneSaisi.trim().replace(/\s+/g, ''),
+    });
+
+    setEnregistrement(false);
+
+    if (!resultat.ok) {
+      setErreurEnregistrement(traduireErreur(resultat.erreur));
+      return;
+    }
+
+    setProfil(resultat.valeur);
+    setTelephoneSaisi(resultat.valeur.utilisateur.telephone ?? '');
+    setMessageSucces('Votre numéro de téléphone a été enregistré par le serveur.');
+  }, [telephoneSaisi]);
+
+  if (etat === 'chargement') {
+    return (
+      <ScreenContainer titre="Profil" afficherRetour={false}>
+        <LoadingState message="Chargement de votre profil…" />
+      </ScreenContainer>
+    );
+  }
+
+  if (etat === 'erreur') {
+    return (
+      <ScreenContainer titre="Profil" afficherRetour={false}>
+        <ErrorState
+          titre="Profil indisponible"
+          message={messageErreur}
+          onReessayer={() => void chargerProfil()}
+        />
+      </ScreenContainer>
+    );
+  }
+
+  if (!profil) {
+    return (
+      <ScreenContainer titre="Profil" afficherRetour={false}>
+        <EmptyState
+          titre="Aucune donnée à afficher"
+          message="Votre profil n’a pas pu être récupéré. Veuillez réessayer."
+          icone="circle-info"
+          actionLibelle="Réessayer"
+          onAction={() => void chargerProfil()}
+        />
+      </ScreenContainer>
+    );
+  }
+
+  const statutCompte = STATUTS_COMPTE[profil.utilisateur.statut];
+  const telephoneActuel = profil.utilisateur.telephone ?? '';
+  const telephoneModifie = telephoneSaisi.trim() !== telephoneActuel;
+  const derniereConnexion = formaterDateHeure(profil.utilisateur.derniere_connexion_at);
+
   return (
     <ScreenContainer titre="Profil" afficherRetour={false}>
       <Text className="text-base text-omda-textGray">
-        Informations du compte et du profil membre : certains champs sont en
-        lecture seule.
+        Retrouvez ci-dessous les informations de votre compte. Les rubriques
+        « lecture seule » ne peuvent pas être modifiées depuis l’application.
       </Text>
 
-      <View className="mt-6 gap-3">
+      {/* ------------------------ Informations modifiables ------------------------ */}
+      <View className="mt-5 w-full rounded-2xl border border-omda-green bg-omda-white p-5">
+        <TitreSection
+          icone="phone"
+          titre="Informations modifiables"
+          mention="Vous pouvez mettre à jour ces informations vous-même."
+        />
+
+        <View className="mt-4">
+          <TextField
+            libelle="Téléphone (+261)"
+            valeur={telephoneSaisi}
+            placeholder="+261 34 12 345 67"
+            aide="Format international (+261…)"
+            clavier="phone-pad"
+            erreur={erreurTelephone}
+            onChangeValeur={(valeur) => {
+              setTelephoneSaisi(valeur);
+              setMessageSucces(null);
+              if (erreurTelephone) {
+                setErreurTelephone(undefined);
+              }
+            }}
+          />
+        </View>
+
+        <View className="mt-4">
+          <Button
+            libelle="Enregistrer"
+            pleineLargeur
+            chargement={enregistrement}
+            desactive={!telephoneModifie}
+            onPress={() => void enregistrerTelephone()}
+          />
+        </View>
+
+        {messageSucces ? (
+          <View className="mt-3">
+            <InfoBanner variante="success" message={messageSucces} />
+          </View>
+        ) : null}
+
+        {erreurEnregistrement ? (
+          <View className="mt-3">
+            <InfoBanner
+              variante="error"
+              titre="Enregistrement impossible"
+              message={erreurEnregistrement}
+              actionLibelle="Réessayer"
+              onAction={() => void enregistrerTelephone()}
+            />
+          </View>
+        ) : null}
+      </View>
+
+      {/* ------------------------- Informations consultables --------------------- */}
+      <View className="mt-4 w-full rounded-2xl border border-omda-borderGray bg-omda-white p-5">
+        <TitreSection
+          icone="lock"
+          titre="Informations en lecture seule"
+          mention="Elles proviennent de votre dossier d’adhésion : contactez l’OMDA pour toute correction."
+        />
+
+        <View className="mt-4">
+          <StatusPill statut="info" icone="lock" libelle="Non modifiable" />
+        </View>
+
+        <View className="mt-4 gap-3">
+          <LigneInfo
+            libelle="Adresse e-mail"
+            valeur={profil.utilisateur.email}
+            icone="envelope"
+          />
+          <LigneInfo
+            libelle="Numéro d’adhérent"
+            valeur={profil.membre.numero_adherent}
+            icone="id-card"
+          />
+          <LigneInfo
+            libelle="Rôle"
+            valeur={LIBELLES_ROLE[profil.utilisateur.role]}
+            icone="user"
+          />
+          <LigneInfo
+            libelle="Adhérent depuis le"
+            valeur={formaterDateCourte(profil.membre.created_at) || '—'}
+            icone="clock"
+          />
+          <LigneInfo
+            libelle="Dernière connexion"
+            valeur={derniereConnexion || 'Aucune connexion enregistrée.'}
+            icone="clock"
+          />
+
+          <View className="w-full rounded-xl border border-omda-borderGray bg-omda-warmGray p-4">
+            <Text className="text-sm text-omda-textGray">Statut du compte</Text>
+            <View className="mt-2">
+              <StatusPill statut={statutCompte.variante} libelle={statutCompte.libelle} />
+            </View>
+          </View>
+        </View>
+      </View>
+
+      {/* ------------------------------- Catégories ------------------------------- */}
+      <View className="mt-4 w-full rounded-2xl border border-omda-borderGray bg-omda-white p-5">
+        <TitreSection
+          icone="list-check"
+          titre="Catégories d’adhésion"
+          mention="Catégories associées à votre profil (lecture seule)."
+        />
+
+        <View className="mt-4">
+          {etat === 'vide' ? (
+            <EmptyState
+              titre="Aucune catégorie"
+              message="Aucune catégorie d’adhésion n’est associée à votre profil pour le moment."
+              icone="folder-open"
+            />
+          ) : (
+            <View className="gap-3">
+              {profil.categories.map((categorie) => {
+                const appartenance = profil.membre_categories.find(
+                  (element) => element.categorie_id === categorie.id,
+                );
+                const statutCategorie = appartenance
+                  ? STATUTS_CATEGORIE[appartenance.statut]
+                  : null;
+                const dateActivation = appartenance
+                  ? formaterDateCourte(appartenance.date_activation)
+                  : '';
+
+                return (
+                  <View
+                    key={categorie.id}
+                    className="w-full rounded-xl border border-omda-borderGray bg-omda-warmGray p-4"
+                  >
+                    <Text className="text-base font-semibold text-omda-black">
+                      {categorie.libelle}
+                    </Text>
+
+                    {categorie.description ? (
+                      <Text className="mt-1 text-sm text-omda-textGray">
+                        {categorie.description}
+                      </Text>
+                    ) : null}
+
+                    {statutCategorie ? (
+                      <View className="mt-3">
+                        <StatusPill
+                          statut={statutCategorie.variante}
+                          libelle={statutCategorie.libelle}
+                        />
+                      </View>
+                    ) : null}
+
+                    {dateActivation ? (
+                      <Text className="mt-2 text-sm text-omda-textGray">
+                        {appartenance?.statut === 'ACTIVE'
+                          ? `Membre de cette catégorie depuis le ${dateActivation}.`
+                          : `Catégorie enregistrée le ${dateActivation}.`}
+                      </Text>
+                    ) : null}
+                  </View>
+                );
+              })}
+            </View>
+          )}
+        </View>
+      </View>
+
+      {/* --------------------------------- Actions -------------------------------- */}
+      <View className="mt-5 gap-3">
         <Button
-          libelle="Accueil"
+          libelle="Actualiser le profil"
+          variante="secondary"
+          icone="rotate-right"
           pleineLargeur
-          onPress={() => router.push('/(membre)/(tabs)/accueil')}
+          onPress={() => void chargerProfil()}
         />
         <Button
           libelle="Se déconnecter"
           variante="secondary"
+          icone="right-from-bracket"
           pleineLargeur
-          onPress={() => router.push('/(public)/accueil')}
+          onPress={() => router.push('/(membre)/deconnexion')}
         />
       </View>
     </ScreenContainer>
