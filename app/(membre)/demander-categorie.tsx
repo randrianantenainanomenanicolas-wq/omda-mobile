@@ -1,5 +1,5 @@
 import { router } from 'expo-router';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Text, View } from 'react-native';
 
 import {
@@ -18,10 +18,20 @@ import type { ErreurApp } from '../../src/services/contracts';
 import { mockMemberRepository, mockPublicContentService } from '../../src/services/mocks';
 
 /**
- * États de l'écran : les 4 états obligatoires (`chargement`, `erreur`,
- * `vide`, `contenu`) + `succes` (accusé de réception d'une demande).
+ * États de rendu de l'écran HORS chargement : les états obligatoires `erreur`,
+ * `vide` et `contenu`, plus `succes` (accusé de réception d'une demande).
+ *
+ * L'état `chargement` est porté par le drapeau booléen `chargement` : il est
+ * désactivé dans le `finally` de la fonction de chargement, l'écran ne peut donc
+ * jamais rester bloqué sur le message « Chargement… ».
  */
-type EtatEcran = 'chargement' | 'erreur' | 'vide' | 'contenu' | 'succes';
+type EtatEcran = 'erreur' | 'vide' | 'contenu' | 'succes';
+
+/**
+ * Délai de sécurité du chargement : au-delà, la réponse est considérée perdue —
+ * l'écran sort du chargement et propose « Réessayer ».
+ */
+const DELAI_MAX_CHARGEMENT_MS = 9000;
 
 /** Message compréhensible selon la famille d'erreur (`Result`). */
 function traduireErreur(erreur: ErreurApp): string {
@@ -42,13 +52,18 @@ function traduireErreur(erreur: ErreurApp): string {
  * aucun paiement.
  *
  * Données : `mockMemberRepository.listerCategoriesMembre()` et
- * `mockPublicContentService.listerCategories()` (aucune catégorie codée en dur ;
- * les catégories déjà au profil sont exclues du choix).
+ * `mockPublicContentService.listerCategories()` — instances centralisées de la
+ * couche data (`src/services/mocks`, aucune classe HTTP ni interface instanciée
+ * ici ; aucune catégorie codée en dur ; les catégories déjà au profil sont
+ * exclues du choix).
  * Gère obligatoirement les 4 états : `LoadingState`, `ErrorState` + « Réessayer »,
  * `EmptyState` (plus aucune catégorie disponible) et contenu normal.
+ * Le choix est chargé par un `useEffect` au montage, sous try/catch/finally, avec
+ * un délai de sécurité : l'écran ne peut jamais rester bloqué sur le chargement.
  */
 export default function DemanderCategorieScreen() {
-  const [etat, setEtat] = useState<EtatEcran>('chargement');
+  const [chargement, setChargement] = useState(true);
+  const [etat, setEtat] = useState<EtatEcran>('vide');
   const [messageErreur, setMessageErreur] = useState('');
   const [options, setOptions] = useState<OptionSelect[]>([]);
   const [libellesDejaPresents, setLibellesDejaPresents] = useState<string[]>([]);
@@ -58,49 +73,95 @@ export default function DemanderCategorieScreen() {
   const [erreurEnvoi, setErreurEnvoi] = useState<string | null>(null);
   const [libelleDemande, setLibelleDemande] = useState('');
 
+  /**
+   * Charge le choix proposé : catégories déjà rattachées au profil
+   * (`listerCategoriesMembre`) et catégories actives du référentiel public
+   * (`listerCategories`), toutes deux fournies par les mocks centralisés.
+   *
+   * `setChargement(false)` est appelé dans le `finally` : l'écran sort donc
+   * TOUJOURS du chargement, qu'il réussisse, qu'il échoue, qu'une exception
+   * survienne ou que le délai de sécurité soit dépassé.
+   */
   const chargerChoix = useCallback(async () => {
-    setEtat('chargement');
+    setChargement(true);
     setMessageErreur('');
     setErreurSelection(undefined);
     setCategorieSelectionnee(null);
     setErreurEnvoi(null);
 
-    const [appartenances, categoriesActives] = await Promise.all([
-      mockMemberRepository.listerCategoriesMembre(),
-      mockPublicContentService.listerCategories(),
-    ]);
+    let minuteurSecurite: ReturnType<typeof setTimeout> | null = null;
 
-    if (!appartenances.ok) {
+    try {
+      const reponses = await Promise.race([
+        Promise.all([
+          mockMemberRepository.listerCategoriesMembre(),
+          mockPublicContentService.listerCategories(),
+        ]),
+        new Promise<null>((resoudre) => {
+          minuteurSecurite = setTimeout(() => resoudre(null), DELAI_MAX_CHARGEMENT_MS);
+        }),
+      ]);
+
+      if (reponses === null) {
+        setMessageErreur(
+          'Délai dépassé : le serveur OMDA met trop de temps à répondre. Vérifiez votre connexion Internet puis réessayez.',
+        );
+        setEtat('erreur');
+        return;
+      }
+
+      const [appartenances, categoriesActives] = reponses;
+
+      if (!appartenances.ok) {
+        setMessageErreur(traduireErreur(appartenances.erreur));
+        setEtat('erreur');
+        return;
+      }
+      if (!categoriesActives.ok) {
+        setMessageErreur(traduireErreur(categoriesActives.erreur));
+        setEtat('erreur');
+        return;
+      }
+
+      // Déjà présentes au profil (tout statut) ⇒ jamais proposées à nouveau.
+      const dejaRattachees = new Set(
+        appartenances.valeur.membre_categories.map((appartenance) => appartenance.categorie_id),
+      );
+      const disponibles: Categorie[] = categoriesActives.valeur.filter(
+        (categorie) => !dejaRattachees.has(categorie.id),
+      );
+
+      setOptions(
+        disponibles.map((categorie) => ({
+          valeur: categorie.id,
+          libelle: categorie.libelle,
+          description: categorie.description ?? undefined,
+        })),
+      );
+      setLibellesDejaPresents(
+        appartenances.valeur.categories.map((categorie) => categorie.libelle),
+      );
+      setEtat(disponibles.length === 0 ? 'vide' : 'contenu');
+    } catch {
+      setMessageErreur(
+        'Une erreur inattendue est survenue pendant le chargement des catégories. Veuillez réessayer dans quelques instants.',
+      );
       setEtat('erreur');
-      setMessageErreur(traduireErreur(appartenances.erreur));
-      return;
+    } finally {
+      if (minuteurSecurite) {
+        clearTimeout(minuteurSecurite);
+      }
+      setChargement(false);
     }
-    if (!categoriesActives.ok) {
-      setEtat('erreur');
-      setMessageErreur(traduireErreur(categoriesActives.erreur));
-      return;
-    }
-
-    // Déjà présentes au profil (tout statut) ⇒ jamais proposées à nouveau.
-    const dejaRattachees = new Set(
-      appartenances.valeur.membre_categories.map((appartenance) => appartenance.categorie_id),
-    );
-    const disponibles: Categorie[] = categoriesActives.valeur.filter(
-      (categorie) => !dejaRattachees.has(categorie.id),
-    );
-
-    setOptions(
-      disponibles.map((categorie) => ({
-        valeur: categorie.id,
-        libelle: categorie.libelle,
-        description: categorie.description ?? undefined,
-      })),
-    );
-    setLibellesDejaPresents(
-      appartenances.valeur.categories.map((categorie) => categorie.libelle),
-    );
-    setEtat(disponibles.length === 0 ? 'vide' : 'contenu');
   }, []);
+
+  /**
+   * Chargement initial du choix : sans cet appel, l'écran resterait bloqué sur
+   * « Chargement des catégories disponibles… ».
+   */
+  useEffect(() => {
+    void chargerChoix();
+  }, [chargerChoix]);
 
   const envoyerDemande = useCallback(async () => {
     if (!categorieSelectionnee) {
@@ -111,28 +172,35 @@ export default function DemanderCategorieScreen() {
     setEnvoiEnCours(true);
     setErreurEnvoi(null);
 
-    const resultat = await mockMemberRepository.demanderCategorieSupplementaire(
-      categorieSelectionnee,
-    );
+    try {
+      const resultat = await mockMemberRepository.demanderCategorieSupplementaire(
+        categorieSelectionnee,
+      );
 
-    setEnvoiEnCours(false);
-
-    if (!resultat.ok) {
-      if (resultat.erreur.type === 'metier' && resultat.erreur.code.startsWith('CATEGORIE_')) {
-        // Liste périmée (catégorie déjà ajoutée entre-temps) : on resynchronise
-        // l'écran avec l'état du serveur plutôt que de proposer un renvoi voué à
-        // échouer — la catégorie demandée disparaît alors du choix proposé.
-        await chargerChoix();
+      if (!resultat.ok) {
+        if (resultat.erreur.type === 'metier' && resultat.erreur.code.startsWith('CATEGORIE_')) {
+          // Liste périmée (catégorie déjà ajoutée entre-temps) : on resynchronise
+          // l'écran avec l'état du serveur plutôt que de proposer un renvoi voué à
+          // échouer — la catégorie demandée disparaît alors du choix proposé.
+          await chargerChoix();
+          return;
+        }
+        setErreurEnvoi(traduireErreur(resultat.erreur));
         return;
       }
-      setErreurEnvoi(traduireErreur(resultat.erreur));
-      return;
-    }
 
-    setLibelleDemande(
-      options.find((option) => option.valeur === categorieSelectionnee)?.libelle ?? '',
-    );
-    setEtat('succes');
+      setLibelleDemande(
+        options.find((option) => option.valeur === categorieSelectionnee)?.libelle ?? '',
+      );
+      setEtat('succes');
+    } catch {
+      setErreurEnvoi(
+        'Une erreur inattendue est survenue pendant l’envoi de votre demande. Veuillez réessayer dans quelques instants.',
+      );
+    } finally {
+      // Le bouton ne doit jamais rester bloqué sur son indicateur de chargement.
+      setEnvoiEnCours(false);
+    }
   }, [chargerChoix, categorieSelectionnee, options]);
 
   const retourProfil = useCallback(() => {
@@ -143,7 +211,7 @@ export default function DemanderCategorieScreen() {
     router.replace('/(membre)/(tabs)/profil');
   }, []);
 
-  if (etat === 'chargement') {
+  if (chargement) {
     return (
       <ScreenContainer titre="Demander une catégorie" sousTitre="Mes catégories">
         <LoadingState message="Chargement des catégories disponibles…" />
