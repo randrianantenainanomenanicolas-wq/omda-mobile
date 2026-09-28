@@ -12,6 +12,7 @@ import {
   ScreenContainer,
   SelectField,
   StatusPill,
+  TextField,
   type StatutPill,
 } from '../../../src/components/ui';
 import {
@@ -31,6 +32,10 @@ import { mockMemberRepository, mockPublicContentService } from '../../../src/ser
  *   filtre par statut est appliqué CÔTÉ SERVICE, jamais dans l'UI) et libellés de
  *   catégories issus de `mockPublicContentService.listerCategories()` ;
  * - 4 états obligatoires : chargement / erreur + « Réessayer » / vide / contenu ;
+ * - recherche LOCALE insensible à la casse sur le titre et la description, plus
+ *   filtre local par catégorie affiché UNIQUEMENT si le membre appartient à
+ *   2 catégories ou plus (options issues de `listerCategoriesMembre()` et du
+ *   référentiel : aucun libellé de catégorie codé en dur) ;
  * - une seule pastille verte est autorisée : `DEPOT_FINALISE` (effet serveur
  *   après un paiement `REUSSI`) — `VALIDEE` reste en `info`, jamais en vert,
  *   puisque les frais de dépôt ne sont pas encore réglés ;
@@ -42,6 +47,9 @@ type EtatEcran = 'chargement' | 'erreur' | 'vide' | 'contenu';
 
 /** Valeur du filtre « toutes les œuvres » : aucun statut transmis au service. */
 const FILTRE_TOUS = 'TOUS';
+
+/** Valeur du filtre « toutes les catégories » : aucun critère local appliqué. */
+const FILTRE_CATEGORIE_TOUTES = 'TOUTES';
 
 /** Libellés et pastilles des statuts d'œuvre (cahier des charges §6). */
 const STATUTS_AFFICHES: Record<StatutOeuvre, { variante: StatutPill; libelle: string }> = {
@@ -128,18 +136,26 @@ export default function OeuvresScreen() {
   const [categories, setCategories] = useState<Categorie[]>([]);
   const [filtre, setFiltre] = useState<string>(FILTRE_TOUS);
 
+  /** Recherche locale (titre + description), conservée entre deux affichages. */
+  const [termeRecherche, setTermeRecherche] = useState('');
+  /** Filtre local par catégorie (`TOUTES` = aucun critère). */
+  const [filtreCategorie, setFiltreCategorie] = useState<string>(FILTRE_CATEGORIE_TOUTES);
+  /** Catégories du membre (`membre_categorie`) : alimenteront le filtre affiché. */
+  const [categoriesMembre, setCategoriesMembre] = useState<Categorie[]>([]);
+
   const statutFiltre: StatutOeuvre | null =
     filtre === FILTRE_TOUS ? null : (filtre as StatutOeuvre);
 
-  /** Charge les œuvres (filtre transmis au service) et le référentiel des catégories. */
+  /** Charge les œuvres (filtre transmis au service), le référentiel et les catégories du membre. */
   const chargerOeuvres = useCallback(async (statut: StatutOeuvre | null) => {
     setEtat('chargement');
     setMessageErreur('');
 
     try {
-      const [reponseOeuvres, reponseCategories] = await Promise.all([
+      const [reponseOeuvres, reponseCategories, reponseAppartenances] = await Promise.all([
         mockMemberRepository.listerOeuvres(statut ? { statut } : undefined),
         mockPublicContentService.listerCategories(),
+        mockMemberRepository.listerCategoriesMembre(),
       ]);
 
       if (!reponseOeuvres.ok) {
@@ -156,8 +172,16 @@ export default function OeuvresScreen() {
         return;
       }
 
+      if (!reponseAppartenances.ok) {
+        setOeuvres([]);
+        setMessageErreur(traduireErreur(reponseAppartenances.erreur));
+        setEtat('erreur');
+        return;
+      }
+
       setOeuvres(reponseOeuvres.valeur);
       setCategories(reponseCategories.valeur);
+      setCategoriesMembre(reponseAppartenances.valeur.categories);
       setEtat(reponseOeuvres.valeur.length === 0 ? 'vide' : 'contenu');
     } catch {
       setOeuvres([]);
@@ -192,6 +216,65 @@ export default function OeuvresScreen() {
     ],
     [],
   );
+
+  /** Catégories du membre (libellés issus du service, jamais écrits dans l'écran). */
+  const optionsCategorie = useMemo(
+    () =>
+      categoriesMembre.map((categorie) => ({
+        valeur: categorie.id,
+        libelle: categorie.libelle,
+      })),
+    [categoriesMembre],
+  );
+
+  /** Le filtre par catégorie n'existe que si le membre est dans 2 catégories ou plus. */
+  const afficherFiltreCategorie = optionsCategorie.length >= 2;
+
+  /** Options effectivement rendues : « Toutes les catégories » + celles du membre. */
+  const optionsSelectCategorie = useMemo(
+    () => [
+      { valeur: FILTRE_CATEGORIE_TOUTES, libelle: 'Toutes les catégories' },
+      ...optionsCategorie,
+    ],
+    [optionsCategorie],
+  );
+
+  /**
+   * Catégorie effectivement appliquée : `null` si le filtre n'est pas affiché
+   * ou si la valeur choisie n'appartient plus au profil (catégorie retirée
+   * entre deux affichages) — la liste ne peut alors jamais être vidée à tort.
+   */
+  const categorieFiltre = useMemo(() => {
+    if (!afficherFiltreCategorie) return null;
+    return optionsCategorie.some((option) => option.valeur === filtreCategorie)
+      ? filtreCategorie
+      : null;
+  }, [afficherFiltreCategorie, filtreCategorie, optionsCategorie]);
+
+  /** Œuvres affichées : filtres LOCAUX (recherche + catégorie) sur la liste du service. */
+  const oeuvresAffichees = useMemo(() => {
+    const terme = termeRecherche.trim().toLowerCase();
+
+    return oeuvres.filter((oeuvre) => {
+      const rechercheOk =
+        terme.length === 0 ||
+        oeuvre.titre.toLowerCase().includes(terme) ||
+        (oeuvre.description ?? '').toLowerCase().includes(terme);
+      const categorieOk = categorieFiltre === null || oeuvre.categorie_id === categorieFiltre;
+
+      return rechercheOk && categorieOk;
+    });
+  }, [categorieFiltre, oeuvres, termeRecherche]);
+
+  /** Vrai dès qu'un filtre local (recherche ou catégorie) s'applique. */
+  const filtreLocalActif =
+    termeRecherche.trim().length > 0 || categorieFiltre !== null;
+
+  /** Efface la recherche et le filtre local (sans recharger les données). */
+  const effacerFiltres = useCallback(() => {
+    setTermeRecherche('');
+    setFiltreCategorie(FILTRE_CATEGORIE_TOUTES);
+  }, []);
 
   const ouvrirDepot = useCallback(() => {
     router.push('/(membre)/depot-oeuvre');
@@ -229,6 +312,28 @@ export default function OeuvresScreen() {
       </Text>
 
       <View className="mt-5">
+        <TextField
+          libelle="Recherche"
+          valeur={termeRecherche}
+          onChangeValeur={setTermeRecherche}
+          placeholder="Rechercher une œuvre…"
+          aide="Par titre ou description, insensible à la casse."
+        />
+      </View>
+
+      {afficherFiltreCategorie ? (
+        <View className="mt-4">
+          <SelectField
+            libelle="Filtrer par catégorie"
+            options={optionsSelectCategorie}
+            valeur={categorieFiltre ?? FILTRE_CATEGORIE_TOUTES}
+            onChangeValeur={setFiltreCategorie}
+            aide="Vos catégories d’adhésion, fournies par le serveur OMDA."
+          />
+        </View>
+      ) : null}
+
+      <View className="mt-4">
         <SelectField
           libelle="Filtrer par statut"
           options={optionsFiltre}
@@ -254,13 +359,27 @@ export default function OeuvresScreen() {
             onAction={ouvrirDepot}
           />
         </View>
+      ) : oeuvresAffichees.length === 0 ? (
+        <View className="mt-5">
+          <EmptyState
+            titre="Aucun résultat"
+            message="Aucune œuvre ne correspond à votre recherche."
+            icone="folder-open"
+            actionLibelle={
+              termeRecherche.trim().length > 0 ? 'Effacer la recherche' : 'Effacer les filtres'
+            }
+            onAction={effacerFiltres}
+          />
+        </View>
       ) : (
         <View className="mt-5 gap-4">
           <Text className="text-base font-semibold text-omda-black">
-            {oeuvres.length > 1 ? `${oeuvres.length} œuvres` : `${oeuvres.length} œuvre`}
+            {filtreLocalActif
+              ? `${oeuvresAffichees.length} résultat${oeuvresAffichees.length > 1 ? 's' : ''}`
+              : `${oeuvresAffichees.length} œuvre${oeuvresAffichees.length > 1 ? 's' : ''}`}
           </Text>
 
-          {oeuvres.map((oeuvre) => (
+          {oeuvresAffichees.map((oeuvre) => (
             <CarteOeuvre
               key={oeuvre.id}
               oeuvre={oeuvre}

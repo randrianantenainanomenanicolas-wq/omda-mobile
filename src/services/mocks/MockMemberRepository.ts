@@ -36,6 +36,7 @@ import type {
   TableauDeBordEntree,
   TableauDeBordMembre,
   TeleversementEntree,
+  UrlFichierConsulte,
 } from '../contracts';
 import {
   CODES_ERREUR_CANDIDAT,
@@ -75,6 +76,7 @@ import {
   refusMock,
   remplacerAttestationOeuvre,
   simulerTeleversement,
+  urlConsultationFichier,
   utilisateurCourant,
 } from './etatMock';
 
@@ -532,6 +534,37 @@ export class MockMemberRepository implements MemberRepository {
       return refusOeuvreIntrouvable();
     }
     return ok(attestationsOeuvre(oeuvre.id));
+  }
+
+  /**
+   * Lien temporaire de consultation d'un document (œuvre ou attestation) :
+   * écoute audio, ouverture dans une application du téléphone ou partage.
+   *
+   * Aucun contrôle d'appartenance n'est possible sur un chemin de stockage : le
+   * futur service réel ne signera un lien QUE si le fichier appartient au membre
+   * (politiques du Storage) — comme ici, aucune donnée d'un autre membre ne peut
+   * être atteinte puisque le chemin vient toujours de `listerOeuvres`,
+   * `obtenirOeuvre` ou `listerAttestationsOeuvre`.
+   */
+  async obtenirUrlFichier(chemin_stockage: string): Promise<Result<UrlFichierConsulte>> {
+    const panne = await preparerAppelMock();
+    if (panne) {
+      return panne;
+    }
+    const contexte = contexteMembre();
+    if (!contexte) {
+      return sessionRequise();
+    }
+
+    const url = urlConsultationFichier(chemin_stockage);
+    if (!url) {
+      return erreurMetier(
+        CODES_ERREUR_MEMBRE.FICHIER_INTROUVABLE,
+        'Ce document n’est pas disponible. Rechargez la fiche puis réessayez.',
+      );
+    }
+
+    return ok({ url, chemin_stockage: chemin_stockage.trim() });
   }
 
   /** Crée un brouillon d'œuvre : aucun envoi, aucun paiement (règle métier 4). */

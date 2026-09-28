@@ -15,7 +15,7 @@ import {
 } from '../src/services/mocks';
 
 /**
- * Vérification d'exécution des mocks (smoke test) : 118 contrôles sur les 4 mocks
+ * Vérification d'exécution des mocks (smoke test) : 121 contrôles sur les 4 mocks
  * + fixtures. Lancer avec `npx --yes tsx tools/verif-mocks.ts` — sortie attendue :
  * `TOUS LES CONTROLES SONT PASSES`.
  */
@@ -870,6 +870,33 @@ async function scenarioMembreOeuvres(): Promise<void> {
     attestationsEnregistrees.ok &&
       attestationsEnregistrees.valeur.length === 1 &&
       attestationsEnregistrees.valeur[0].chemin_stockage === attestationCorrigee.chemin_stockage,
+  );
+
+  /** Consultation d'un document : lien temporaire demandé au service. */
+  const urlFichierTeleverse = await mockMemberRepository.obtenirUrlFichier(
+    'oeuvres/brouillons/poemes-cote.pdf',
+  );
+  verifier(
+    'lien d’un fichier téléversé : URI locale de la session (écoute et partage réels)',
+    urlFichierTeleverse.ok && urlFichierTeleverse.valeur.url === 'file:///tmp/poemes-cote.pdf',
+  );
+
+  const urlFichierJeuDeTest = await mockMemberRepository.obtenirUrlFichier(
+    'oeuvres/jeux-de-test/varangue.mp3',
+  );
+  verifier(
+    'lien d’un document des jeux de test : URL signée du bucket simulé',
+    urlFichierJeuDeTest.ok &&
+      urlFichierJeuDeTest.valeur.url.startsWith('https://mock.omda.mg/storage/') &&
+      urlFichierJeuDeTest.valeur.url.includes('oeuvres/jeux-de-test/varangue.mp3'),
+  );
+
+  const urlFichierAbsent = await mockMemberRepository.obtenirUrlFichier('   ');
+  verifier(
+    'chemin de stockage vide -> FICHIER_INTROUVABLE',
+    !urlFichierAbsent.ok &&
+      urlFichierAbsent.erreur.type === 'metier' &&
+      urlFichierAbsent.erreur.code === 'FICHIER_INTROUVABLE',
   );
 
   const oeuvreValideeFigee = await mockMemberRepository.mettreAJourOeuvre(

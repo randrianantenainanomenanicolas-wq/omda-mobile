@@ -105,6 +105,18 @@ export interface MemberRepository {
    */
   listerAttestationsOeuvre(oeuvre_id: UUID): Promise<Result<AttestationDiffusion[]>>;
 
+  /**
+   * Lien TEMPORAIRE de consultation d'un document déjà stocké : écoute dans
+   * l'application (œuvre audio), ouverture dans une application du téléphone ou
+   * partage.
+   *
+   * ⚠️ `chemin_stockage` est un chemin dans un bucket PRIVÉ, jamais un lien :
+   * seul le service sait le transformer en ressource accessible (URL signée côté
+   * serveur ; URI locale du fichier téléversé en mode mock). Aucun écran ne
+   * construit ce lien lui-même.
+   */
+  obtenirUrlFichier(chemin_stockage: string): Promise<Result<UrlFichierConsulte>>;
+
   /** Crée un brouillon d'œuvre (aucun envoi, aucun paiement). */
   creerOeuvre(entree: CreerOeuvreEntree): Promise<Result<Oeuvre>>;
 
@@ -270,6 +282,18 @@ export type SoumettreOeuvreEntree = {
   attestations: FichierDepose[];
 };
 
+/**
+ * Lien temporaire de consultation d'un document stocké (écoute, ouverture,
+ * partage). Le chemin de stockage est un chemin de bucket privé : il ne suffit
+ * pas à ouvrir le document, d'où ce passage obligatoire par le service.
+ */
+export type UrlFichierConsulte = {
+  /** Lien à confier au lecteur audio, à `Linking` ou à la feuille de partage. */
+  url: string;
+  /** Chemin de stockage d'origine (ressource consultée). */
+  chemin_stockage: string;
+};
+
 export type ListerCotisationsEntree = {
   annee?: number;
 };
@@ -308,6 +332,7 @@ export const CODES_ERREUR_MEMBRE = {
   OPERATEUR_INDISPONIBLE: 'OPERATEUR_INDISPONIBLE',
   FICHIER_TROP_VOLUMINEUX: 'FICHIER_TROP_VOLUMINEUX',
   TYPE_FICHIER_NON_AUTORISE: 'TYPE_FICHIER_NON_AUTORISE',
+  FICHIER_INTROUVABLE: 'FICHIER_INTROUVABLE',
   CATEGORIE_INDISPONIBLE: 'CATEGORIE_INDISPONIBLE',
   CATEGORIE_DEJA_ENREGISTREE: 'CATEGORIE_DEJA_ENREGISTREE',
   CATEGORIE_DEJA_DEMANDEE: 'CATEGORIE_DEJA_DEMANDEE',

@@ -50,6 +50,8 @@ import {
  * - délais réseau et pannes (cf. `configMock.ts`) ;
  * - machine à états des paiements Mobile Money / virement bancaire ;
  * - listes dynamiques (opérateurs actifs, coordonnées actives) ;
+ * - liens temporaires de consultation des documents stockés
+ *   (`urlConsultationFichier`) ;
  * - état des comptes, dossiers, œuvres, cotisations et notifications.
  *
  * ⚠️ Aucune confirmation locale : un paiement n'atteint `REUSSI` que par la
@@ -712,11 +714,61 @@ export async function simulerTeleversement(
     options?.onProgression?.(pourcentage);
   }
 
+  /**
+   * Le mock retient l'URI locale du fichier choisi : c'est elle qui permettra de
+   * l'écouter, de l'ouvrir ou de le partager depuis « Fiche de l'œuvre ».
+   */
+  urisLocalesFichiers.set(entree.chemin_stockage, entree.fichier_uri);
+
   return ok({
     chemin_stockage: entree.chemin_stockage,
     mime_type: entree.mime_type,
     taille_octets: entree.taille_octets,
   });
+}
+
+/* --------------------------------- Consultation des documents stockés */
+
+/**
+ * URI locale des fichiers téléversés PENDANT la session (chemin de stockage →
+ * URI `file://` / `content://` du téléphone).
+ *
+ * Le mock n'a pas de vrai Storage : il retient le fichier réellement choisi par
+ * l'utilisateur afin que l'écoute audio et le partage fonctionnent en
+ * démonstration. Au branchement réel (Supabase Storage), `obtenirUrlFichier`
+ * renverra une URL signée et ce registre n'aura plus d'utilité.
+ */
+export const urisLocalesFichiers = new Map<string, string>();
+
+/** Convention d'URL des documents des jeux de test (bucket simulé). */
+export const BASE_URL_STOCKAGE_MOCK = 'https://mock.omda.mg/storage';
+
+/**
+ * Lien temporaire de consultation d'un document stocké.
+ *
+ * - chemin déjà absolu (`file://`, `content://`, `https://`) → renvoyé tel quel ;
+ * - fichier téléversé dans la session → URI locale d'origine (il est donc
+ *   réellement lisible et partageable en démonstration) ;
+ * - document des jeux de test → URL signée factice sur le bucket simulé, même
+ *   convention que les URL de téléversement de `MockCandidateApi`.
+ *
+ * Renvoie `null` si le chemin est vide : le service le traduit en refus métier.
+ */
+export function urlConsultationFichier(cheminStockage: string): string | null {
+  const chemin = cheminStockage.trim();
+  if (chemin.length === 0) {
+    return null;
+  }
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(chemin)) {
+    return chemin;
+  }
+
+  const uriLocale = urisLocalesFichiers.get(chemin);
+  if (uriLocale) {
+    return uriLocale;
+  }
+
+  return `${BASE_URL_STOCKAGE_MOCK}/${chemin}?token=${genererUUID()}`;
 }
 
 /* --------------------------------------------- Données de l'espace membre */
