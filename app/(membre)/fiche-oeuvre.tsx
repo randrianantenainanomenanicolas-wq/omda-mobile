@@ -1,34 +1,438 @@
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Text, View } from 'react-native';
 
-import { Button, ScreenContainer } from '../../src/components/ui';
+import {
+  AmountCard,
+  Button,
+  EmptyState,
+  ErrorState,
+  Icone,
+  InfoBanner,
+  LoadingState,
+  type NomIcone,
+  ScreenContainer,
+  StatusPill,
+  type StatutPill,
+} from '../../src/components/ui';
+import {
+  type Categorie,
+  type Oeuvre,
+  type StatutOeuvre,
+} from '../../src/models';
+import { CODES_ERREUR_MEMBRE } from '../../src/services/contracts';
+import type { ErreurApp, EstimationMontant } from '../../src/services/contracts';
+import { mockMemberRepository, mockPublicContentService } from '../../src/services/mocks';
 
 /**
- * Fiche œuvre (squelette d'étape 4, hors onglets) : actions selon le statut ;
- * « Payer » seulement si l’œuvre est VALIDÉE (règle métier 4 — étapes
- * suivantes).
+ * Écran S — Fiche d'une œuvre (hors onglets).
+ *
+ * Règles appliquées :
+ * - l'œuvre vient de `mockMemberRepository.obtenirOeuvre(oeuvre_id)` : l'UI ne
+ *   déduit jamais un statut, elle affiche celui du serveur ;
+ * - les actions dépendent STRICTEMENT du statut ;
+ * - « Payer les frais de dépôt » n'est proposé QUE pour une œuvre `VALIDEE`
+ *   (règle métier 4) : l'envoi (`ENVOYEE`) ne déclenche aucun paiement ;
+ * - `REJETEE` affiche obligatoirement le motif transmis par l'OMDA ;
+ * - une pastille verte n'apparaît QUE sur `DEPOT_FINALISE`, effet serveur d'un
+ *   paiement confirmé `REUSSI` ;
+ * - le montant des frais de dépôt vient du service (`estimerMontant`), jamais de
+ *   l'écran ; 4 états obligatoires : chargement / erreur / vide / contenu.
  */
+
+type EtatEcran = 'chargement' | 'erreur' | 'vide' | 'contenu';
+
+/** Libellés et pastilles des statuts d'œuvre (cahier des charges §6). */
+const STATUTS_AFFICHES: Record<StatutOeuvre, { variante: StatutPill; libelle: string }> = {
+  BROUILLON: { variante: 'pending', libelle: 'Brouillon' },
+  ENVOYEE: { variante: 'pending', libelle: 'Envoyée à l’OMDA' },
+  EN_COURS_DE_VALIDATION: { variante: 'pending', libelle: 'En cours de validation' },
+  VALIDEE: { variante: 'info', libelle: 'Validée — frais de dépôt à régler' },
+  REJETEE: { variante: 'error', libelle: 'Rejetée' },
+  DEPOT_FINALISE: { variante: 'success', libelle: 'Dépôt finalisé' },
+};
+
+/** Statuts pour lesquels l'œuvre est encore en cours d'examen par l'OMDA. */
+const STATUTS_EN_EXAMEN: StatutOeuvre[] = ['ENVOYEE', 'EN_COURS_DE_VALIDATION'];
+
+/** Paramètre d'URL unique (chaîne) ou absent. */
+function parametreTexte(valeur: string | string[] | undefined): string {
+  if (typeof valeur === 'string') return valeur.trim();
+  if (Array.isArray(valeur) && valeur.length > 0 && typeof valeur[0] === 'string') {
+    return valeur[0].trim();
+  }
+  return '';
+}
+
+/** Message compréhensible selon la famille d'erreur (`Result`). */
+function traduireErreur(erreur: ErreurApp): string {
+  if (erreur.type === 'metier') return erreur.message;
+  if (erreur.type === 'reseau') {
+    return 'Impossible de joindre le serveur OMDA. Vérifiez votre connexion Internet puis réessayez.';
+  }
+  return 'Cette fiche est momentanément indisponible. Veuillez réessayer dans quelques instants.';
+}
+
+/** Date ISO affichée en `JJ/MM/AAAA` (formatage manuel, sans `Intl`). */
+function formaterDateCourte(dateIso: string | null): string {
+  if (!dateIso) return '';
+  const date = new Date(dateIso);
+  if (Number.isNaN(date.getTime())) return '';
+  const jour = String(date.getDate()).padStart(2, '0');
+  const mois = String(date.getMonth() + 1).padStart(2, '0');
+  return `${jour}/${mois}/${date.getFullYear()}`;
+}
+
+/** Nom de fichier lisible à partir du chemin de stockage. */
+function nomFichier(chemin: string | null): string {
+  if (!chemin) return '';
+  const parties = chemin.split('/');
+  return parties[parties.length - 1] ?? '';
+}
+
 export default function FicheOeuvreScreen() {
+  const parametres = useLocalSearchParams<{ oeuvre_id?: string }>();
+  const oeuvreId = parametreTexte(parametres.oeuvre_id);
+
+  const [etat, setEtat] = useState<EtatEcran>('chargement');
+  const [messageErreur, setMessageErreur] = useState('');
+  const [messageVide, setMessageVide] = useState('');
+  const [oeuvre, setOeuvre] = useState<Oeuvre | null>(null);
+  const [categorie, setCategorie] = useState<Categorie | null>(null);
+  const [fraisDepot, setFraisDepot] = useState<EstimationMontant | null>(null);
+  const [erreurFrais, setErreurFrais] = useState<string | null>(null);
+
+  /**
+   * Charge la fiche : l'œuvre (statut faisant foi), le référentiel des catégories
+   * et — uniquement pour une œuvre `VALIDEE` — le montant des frais de dépôt.
+   */
+  const chargerFiche = useCallback(async () => {
+    if (!oeuvreId) {
+      setOeuvre(null);
+      setMessageVide(
+        'Aucune œuvre n’a été transmise à cet écran. Revenez à la liste de vos œuvres pour ouvrir une fiche.',
+      );
+      setEtat('vide');
+      return;
+    }
+
+    setEtat('chargement');
+    setMessageErreur('');
+    setErreurFrais(null);
+    setFraisDepot(null);
+
+    try {
+      const reponse = await mockMemberRepository.obtenirOeuvre(oeuvreId);
+
+      if (!reponse.ok) {
+        if (
+          reponse.erreur.type === 'metier' &&
+          reponse.erreur.code === CODES_ERREUR_MEMBRE.OEUVRE_INTROUVABLE
+        ) {
+          setOeuvre(null);
+          setMessageVide(reponse.erreur.message);
+          setEtat('vide');
+          return;
+        }
+        setOeuvre(null);
+        setMessageErreur(traduireErreur(reponse.erreur));
+        setEtat('erreur');
+        return;
+      }
+
+      const oeuvreChargee = reponse.valeur;
+
+      const [reponseCategories, reponseFrais] = await Promise.all([
+        mockPublicContentService.listerCategories(),
+        oeuvreChargee.statut === 'VALIDEE'
+          ? mockPublicContentService.estimerMontant({
+              type_operation: 'DEPOT_OEUVRE',
+              categorie_id: oeuvreChargee.categorie_id,
+            })
+          : Promise.resolve(null),
+      ]);
+
+      setOeuvre(oeuvreChargee);
+      setCategorie(
+        reponseCategories.ok
+          ? (reponseCategories.valeur.find(
+              (element) => element.id === oeuvreChargee.categorie_id,
+            ) ?? null)
+          : null,
+      );
+
+      if (reponseFrais) {
+        if (reponseFrais.ok) {
+          setFraisDepot(reponseFrais.valeur);
+        } else {
+          setErreurFrais(traduireErreur(reponseFrais.erreur));
+        }
+      }
+
+      setEtat('contenu');
+    } catch {
+      setOeuvre(null);
+      setMessageErreur(
+        'Une erreur inattendue est survenue pendant le chargement de cette fiche. Veuillez réessayer.',
+      );
+      setEtat('erreur');
+    }
+  }, [oeuvreId]);
+
+  /** Chargement initial : sans cet appel, l'écran resterait en chargement. */
+  useEffect(() => {
+    void chargerFiche();
+  }, [chargerFiche]);
+
+  /* --------------------------------------------------------------- Actions */
+
+  /** Brouillon : reprise du dépôt (titre, catégorie, fichier, attestation). */
+  const reprendreDepot = useCallback(() => {
+    if (!oeuvre) return;
+    router.push({ pathname: '/(membre)/depot-oeuvre', params: { oeuvre_id: oeuvre.id } });
+  }, [oeuvre]);
+
+  /** Œuvre rejetée : nouveau dépôt, l'œuvre rejetée reste consultable ici. */
+  const nouvelDepot = useCallback(() => {
+    router.push('/(membre)/depot-oeuvre');
+  }, []);
+
+  /** Œuvre `VALIDEE` uniquement : paiement des frais de dépôt. */
+  const payerFraisDepot = useCallback(() => {
+    if (!oeuvre) return;
+    router.push({
+      pathname: '/(membre)/paiement-membre',
+      params: { type: 'DEPOT_OEUVRE', oeuvre_id: oeuvre.id },
+    });
+  }, [oeuvre]);
+
+  const retourOeuvres = useCallback(() => {
+    if (router.canGoBack()) {
+      router.back();
+      return;
+    }
+    router.replace('/(membre)/(tabs)/oeuvres');
+  }, []);
+
+  /* ------------------------------------------------------ États de l'écran */
+
+  if (etat === 'chargement') {
+    return (
+      <ScreenContainer titre="Fiche de l’œuvre" sousTitre="Espace membre">
+        <LoadingState message="Chargement de la fiche…" />
+      </ScreenContainer>
+    );
+  }
+
+  if (etat === 'erreur') {
+    return (
+      <ScreenContainer titre="Fiche de l’œuvre" sousTitre="Espace membre">
+        <ErrorState
+          titre="Fiche indisponible"
+          message={messageErreur}
+          libelleAction="Réessayer"
+          onReessayer={() => void chargerFiche()}
+        />
+      </ScreenContainer>
+    );
+  }
+
+  if (etat === 'vide' || !oeuvre) {
+    return (
+      <ScreenContainer titre="Fiche de l’œuvre" sousTitre="Espace membre">
+        <EmptyState
+          titre="Œuvre introuvable"
+          message={messageVide}
+          icone="folder-open"
+          actionLibelle="Voir mes œuvres"
+          onAction={retourOeuvres}
+        />
+      </ScreenContainer>
+    );
+  }
+
+  const statut = STATUTS_AFFICHES[oeuvre.statut];
+  const dateSoumission = formaterDateCourte(oeuvre.date_soumission);
+  const dateDecision = formaterDateCourte(oeuvre.date_decision);
+  const fichier = nomFichier(oeuvre.chemin_fichier);
+  const enExamen = STATUTS_EN_EXAMEN.includes(oeuvre.statut);
+
   return (
     <ScreenContainer titre="Fiche de l’œuvre" sousTitre="Espace membre">
-      <Text className="text-base text-omda-textGray">
-        Détail de l’œuvre et de son statut, avec les actions disponibles pour
-        ce statut.
-      </Text>
+      <View className="w-full rounded-2xl border border-omda-borderGray bg-omda-white p-5">
+        <Text className="text-2xl font-bold text-omda-black">{oeuvre.titre}</Text>
+
+        <View className="mt-2 flex-row items-center">
+          <Icone nom="tag" taille={14} classeCouleur="text-omda-textGray" />
+          <Text className="ml-2 flex-1 text-base text-omda-textGray">
+            {categorie ? categorie.libelle : 'Catégorie non précisée'}
+            {oeuvre.annee ? ` — ${oeuvre.annee}` : ''}
+          </Text>
+        </View>
+
+        <View className="mt-3">
+          <StatusPill statut={statut.variante} libelle={statut.libelle} />
+        </View>
+
+        {oeuvre.description ? (
+          <Text className="mt-3 text-base text-omda-black">{oeuvre.description}</Text>
+        ) : null}
+
+        <View className="mt-4 gap-2">
+          <LigneInfo
+            icone="file-lines"
+            libelle="Fichier déposé"
+            valeur={fichier || 'Aucun fichier pour le moment'}
+          />
+          <LigneInfo
+            icone="paper-plane"
+            libelle="Envoi à l’OMDA"
+            valeur={dateSoumission || 'Pas encore envoyée'}
+          />
+          <LigneInfo
+            icone="clipboard-check"
+            libelle="Décision de l’OMDA"
+            valeur={dateDecision || 'En attente'}
+          />
+        </View>
+      </View>
+
+      {oeuvre.statut === 'BROUILLON' ? (
+        <View className="mt-5 gap-3">
+          <InfoBanner
+            variante="info"
+            titre="Brouillon"
+            message="Cette œuvre n’a pas encore été envoyée à l’OMDA. Complétez son fichier et son attestation de diffusion, puis envoyez-la : aucun paiement n’est demandé à l’envoi."
+          />
+          <Button
+            libelle="Reprendre le dépôt"
+            icone="pen-to-square"
+            pleineLargeur
+            onPress={reprendreDepot}
+          />
+        </View>
+      ) : null}
+
+      {enExamen ? (
+        <View className="mt-5 gap-3">
+          <InfoBanner
+            variante="pending"
+            titre="Œuvre en cours d’examen"
+            message="L’OMDA vérifie votre œuvre. Aucun paiement n’est demandé à cette étape : les frais de dépôt ne seront proposés qu’après la validation."
+          />
+          <Button
+            libelle="Actualiser"
+            variante="secondary"
+            icone="rotate-right"
+            pleineLargeur
+            onPress={() => void chargerFiche()}
+          />
+        </View>
+      ) : null}
+
+      {oeuvre.statut === 'VALIDEE' ? (
+        <View className="mt-5 gap-3">
+          <InfoBanner
+            variante="pending"
+            titre="Œuvre validée"
+            message="Votre œuvre a été validée par l’OMDA. Réglez les frais de dépôt pour finaliser le dépôt."
+          />
+
+          {fraisDepot ? (
+            <>
+              <AmountCard
+                objet={`Frais de dépôt — ${oeuvre.titre}`}
+                montant={fraisDepot.montant}
+                mention={fraisDepot.mention}
+              />
+              <Button
+                libelle="Payer les frais de dépôt"
+                variante="secondary"
+                icone="money-bill-wave"
+                pleineLargeur
+                onPress={payerFraisDepot}
+              />
+            </>
+          ) : null}
+
+          {erreurFrais ? (
+            <InfoBanner
+              variante="error"
+              titre="Montant indisponible"
+              message={erreurFrais}
+              actionLibelle="Réessayer"
+              onAction={() => void chargerFiche()}
+            />
+          ) : null}
+        </View>
+      ) : null}
+
+      {oeuvre.statut === 'REJETEE' ? (
+        <View className="mt-5 gap-3">
+          <InfoBanner
+            variante="error"
+            titre="Œuvre rejetée"
+            message={
+              oeuvre.motif_rejet ??
+              'Aucun motif n’a été transmis. Contactez l’OMDA pour plus d’informations.'
+            }
+          />
+          <Button
+            libelle="Déposer une nouvelle œuvre"
+            variante="secondary"
+            icone="plus"
+            pleineLargeur
+            onPress={nouvelDepot}
+          />
+        </View>
+      ) : null}
+
+      {oeuvre.statut === 'DEPOT_FINALISE' ? (
+        <View className="mt-5">
+          <InfoBanner
+            variante="success"
+            titre="Dépôt finalisé"
+            message="Le serveur OMDA a confirmé le paiement des frais de dépôt : votre œuvre est enregistrée."
+          />
+        </View>
+      ) : null}
 
       <View className="mt-6 gap-3">
         <Button
           libelle="Mes œuvres"
+          variante="secondary"
+          icone="folder-open"
           pleineLargeur
-          onPress={() => router.push('/(membre)/(tabs)/oeuvres')}
+          onPress={retourOeuvres}
         />
         <Button
-          libelle="Accueil"
+          libelle="Retour à l’accueil"
           variante="secondary"
+          icone="house"
           pleineLargeur
           onPress={() => router.push('/(membre)/(tabs)/accueil')}
         />
       </View>
     </ScreenContainer>
+  );
+}
+
+/* ------------------------------------------------- Sous-composant local */
+
+type PropsLigneInfo = {
+  icone: NomIcone;
+  libelle: string;
+  valeur: string;
+};
+
+/** Ligne « libellé : valeur » de la fiche (information non modifiable). */
+function LigneInfo({ icone, libelle, valeur }: PropsLigneInfo) {
+  return (
+    <View className="w-full flex-row items-center">
+      <Icone nom={icone} taille={14} classeCouleur="text-omda-textGray" />
+      <Text className="ml-2 flex-1 text-sm text-omda-textGray">
+        {`${libelle} : ${valeur}`}
+      </Text>
+    </View>
   );
 }

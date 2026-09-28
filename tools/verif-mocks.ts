@@ -1,3 +1,4 @@
+import { TAILLE_MAX_FICHIER_OCTETS, type TypeMime } from '../src/models';
 import {
   definirDelaisMock,
   definirOperateurActif,
@@ -14,7 +15,7 @@ import {
 } from '../src/services/mocks';
 
 /**
- * Vérification d'exécution des mocks (smoke test) : 97 contrôles sur les 4 mocks
+ * Vérification d'exécution des mocks (smoke test) : 116 contrôles sur les 4 mocks
  * + fixtures. Lancer avec `npx --yes tsx tools/verif-mocks.ts` — sortie attendue :
  * `TOUS LES CONTROLES SONT PASSES`.
  */
@@ -661,6 +662,272 @@ async function scenarioMembreConnexion(): Promise<void> {
 }
 
 /**
+ * Écrans Q, R, S (partie 2 de l'espace membre) — cycle de vie d'une œuvre :
+ * brouillon, modification, téléversement (progression, annulation, contrôles
+ * 20 Mo / type MIME), envoi `ENVOYEE` SANS paiement (règle métier 4), refus des
+ * paiements d'œuvre non validée, cotisation de l'année et erreurs de paiement.
+ * S'exécute avec la session du compte « complet » (`membre@omda.mg`) encore
+ * ouverte et n'ajoute AUCUNE notification (aucun paiement confirmé).
+ */
+async function scenarioMembreOeuvres(): Promise<void> {
+  const appartenances = await mockMemberRepository.listerCategoriesMembre();
+  const categorieId = appartenances.ok ? appartenances.valeur.categories[0].id : '';
+
+  const brouillon = await mockMemberRepository.creerOeuvre({
+    titre: 'Poèmes de la côte',
+    categorie_id: categorieId,
+    description: 'Recueil en chantier.',
+    annee: 2026,
+  });
+  verifier(
+    'création d’une œuvre -> BROUILLON (ni fichier, ni envoi, ni paiement)',
+    brouillon.ok &&
+      brouillon.valeur.statut === 'BROUILLON' &&
+      brouillon.valeur.chemin_fichier === null &&
+      brouillon.valeur.date_soumission === null &&
+      brouillon.valeur.motif_rejet === null,
+  );
+  const oeuvreId = brouillon.ok ? brouillon.valeur.id : '';
+
+  const brouillons = await mockMemberRepository.listerOeuvres({ statut: 'BROUILLON' });
+  verifier(
+    'filtre BROUILLON : le brouillon créé est listé',
+    brouillons.ok && brouillons.valeur.some((oeuvre) => oeuvre.id === oeuvreId),
+  );
+
+  const modifie = await mockMemberRepository.mettreAJourOeuvre(oeuvreId, {
+    titre: 'Poèmes de la côte (version 2)',
+    annee: 2025,
+  });
+  verifier(
+    'brouillon modifiable (titre + année)',
+    modifie.ok &&
+      modifie.valeur.titre === 'Poèmes de la côte (version 2)' &&
+      modifie.valeur.annee === 2025,
+  );
+
+  const progressions: number[] = [];
+  const fichier = await mockMemberRepository.televerserFichier(
+    {
+      bucket: 'oeuvres',
+      chemin_stockage: 'oeuvres/brouillons/poemes-cote.pdf',
+      fichier_uri: 'file:///tmp/poemes-cote.pdf',
+      nom_fichier: 'poemes-cote.pdf',
+      mime_type: 'application/pdf',
+      taille_octets: 512000,
+    },
+    { onProgression: (pourcentage) => progressions.push(pourcentage) },
+  );
+  verifier(
+    'téléversement d’une œuvre : progression 0 → 100 puis référence déposée',
+    fichier.ok &&
+      fichier.valeur.chemin_stockage === 'oeuvres/brouillons/poemes-cote.pdf' &&
+      progressions.length > 0 &&
+      progressions[progressions.length - 1] === 100,
+  );
+
+  const mimeRefuse = await mockMemberRepository.televerserFichier({
+    bucket: 'oeuvres',
+    chemin_stockage: 'oeuvres/brouillons/mauvais-format.gif',
+    fichier_uri: 'file:///tmp/mauvais-format.gif',
+    nom_fichier: 'mauvais-format.gif',
+    mime_type: 'image/gif' as TypeMime,
+    taille_octets: 1024,
+  });
+  verifier(
+    'format non autorisé refusé (TYPE_FICHIER_NON_AUTORISE)',
+    !mimeRefuse.ok &&
+      mimeRefuse.erreur.type === 'metier' &&
+      mimeRefuse.erreur.code === 'TYPE_FICHIER_NON_AUTORISE',
+  );
+
+  const tropVolumineux = await mockMemberRepository.televerserFichier({
+    bucket: 'oeuvres',
+    chemin_stockage: 'oeuvres/brouillons/trop-gros.pdf',
+    fichier_uri: 'file:///tmp/trop-gros.pdf',
+    nom_fichier: 'trop-gros.pdf',
+    mime_type: 'application/pdf',
+    taille_octets: TAILLE_MAX_FICHIER_OCTETS + 1,
+  });
+  verifier(
+    'fichier dépassant 20 Mo refusé (FICHIER_TROP_VOLUMINEUX)',
+    !tropVolumineux.ok &&
+      tropVolumineux.erreur.type === 'metier' &&
+      tropVolumineux.erreur.code === 'FICHIER_TROP_VOLUMINEUX',
+  );
+
+  const controleur = new AbortController();
+  controleur.abort();
+  const envoiAnnule = await mockMemberRepository.televerserFichier(
+    {
+      bucket: 'oeuvres',
+      chemin_stockage: 'oeuvres/brouillons/interrompu.pdf',
+      fichier_uri: 'file:///tmp/interrompu.pdf',
+      nom_fichier: 'interrompu.pdf',
+      mime_type: 'application/pdf',
+      taille_octets: 2048,
+    },
+    { signal: controleur.signal },
+  );
+  verifier(
+    'envoi annulé -> TELEVERSEMENT_ANNULE (reprise possible)',
+    !envoiAnnule.ok &&
+      envoiAnnule.erreur.type === 'metier' &&
+      envoiAnnule.erreur.code === 'TELEVERSEMENT_ANNULE',
+  );
+
+  const fichierDepose = fichier.ok
+    ? fichier.valeur
+    : { chemin_stockage: '', mime_type: 'application/pdf' as TypeMime, taille_octets: 0 };
+  const attestation = {
+    chemin_stockage: 'oeuvres/brouillons/attestation-cote.pdf',
+    mime_type: 'application/pdf' as TypeMime,
+    taille_octets: 98304,
+  };
+
+  const sansAttestation = await mockMemberRepository.soumettreOeuvre({
+    oeuvre_id: oeuvreId,
+    fichier: fichierDepose,
+    attestations: [],
+  });
+  verifier(
+    'envoi sans attestation de diffusion refusé (règle métier 8)',
+    !sansAttestation.ok &&
+      sansAttestation.erreur.type === 'metier' &&
+      sansAttestation.erreur.code === 'DOSSIER_INCOMPLET',
+  );
+
+  const envoyee = await mockMemberRepository.soumettreOeuvre({
+    oeuvre_id: oeuvreId,
+    fichier: fichierDepose,
+    attestations: [attestation],
+  });
+  verifier(
+    'envoi de l’œuvre -> ENVOYEE avec fichier et date de soumission',
+    envoyee.ok &&
+      envoyee.valeur.statut === 'ENVOYEE' &&
+      envoyee.valeur.chemin_fichier === fichierDepose.chemin_stockage &&
+      envoyee.valeur.date_soumission !== null,
+  );
+
+  const paiementAvantValidation = await mockMemberRepository.initierPaiement({
+    type: 'DEPOT_OEUVRE',
+    mode: 'MOBILE_MONEY',
+    operateur: 'MVOLA',
+    numero_telephone: '+261340000001',
+    oeuvre_id: oeuvreId,
+  });
+  verifier(
+    'AUCUN paiement à l’envoi : paiement refusé tant que l’œuvre n’est pas VALIDEE',
+    !paiementAvantValidation.ok &&
+      paiementAvantValidation.erreur.type === 'metier' &&
+      paiementAvantValidation.erreur.code === 'OEUVRE_NON_VALIDEE',
+  );
+
+  const paiementOeuvreRejetee = await mockMemberRepository.initierPaiement({
+    type: 'DEPOT_OEUVRE',
+    mode: 'MOBILE_MONEY',
+    operateur: 'MVOLA',
+    numero_telephone: '+261340000001',
+    oeuvre_id: 'a0000000-0000-4000-8000-000000000003',
+  });
+  verifier(
+    'œuvre REJETEE non payable (OEUVRE_NON_VALIDEE)',
+    !paiementOeuvreRejetee.ok &&
+      paiementOeuvreRejetee.erreur.type === 'metier' &&
+      paiementOeuvreRejetee.erreur.code === 'OEUVRE_NON_VALIDEE',
+  );
+
+  const modificationApresEnvoi = await mockMemberRepository.mettreAJourOeuvre(oeuvreId, {
+    titre: 'Titre interdit',
+  });
+  verifier(
+    'œuvre envoyée non modifiable (OEUVRE_NON_MODIFIABLE)',
+    !modificationApresEnvoi.ok &&
+      modificationApresEnvoi.erreur.type === 'metier' &&
+      modificationApresEnvoi.erreur.code === 'OEUVRE_NON_MODIFIABLE',
+  );
+
+  const renvoi = await mockMemberRepository.soumettreOeuvre({
+    oeuvre_id: oeuvreId,
+    fichier: fichierDepose,
+    attestations: [attestation],
+  });
+  verifier(
+    'second envoi de la même œuvre refusé (OEUVRE_NON_MODIFIABLE)',
+    !renvoi.ok && renvoi.erreur.type === 'metier' && renvoi.erreur.code === 'OEUVRE_NON_MODIFIABLE',
+  );
+
+  const oeuvreIntrouvable = await mockMemberRepository.obtenirOeuvre(
+    'a0000000-0000-4000-8000-0000000000ff',
+  );
+  verifier(
+    'œuvre inconnue -> OEUVRE_INTROUVABLE',
+    !oeuvreIntrouvable.ok &&
+      oeuvreIntrouvable.erreur.type === 'metier' &&
+      oeuvreIntrouvable.erreur.code === 'OEUVRE_INTROUVABLE',
+  );
+
+  const cotisation2026 = await mockMemberRepository.obtenirCotisation(2026);
+  verifier(
+    'cotisation 2026 : NON_PAYEE, montant du service, aucune date de paiement',
+    cotisation2026.ok &&
+      cotisation2026.valeur.statut === 'NON_PAYEE' &&
+      cotisation2026.valeur.montant > 0 &&
+      cotisation2026.valeur.date_paiement === null,
+  );
+  const cotisationId = cotisation2026.ok ? cotisation2026.valeur.id : '';
+
+  const cotisationAbsente = await mockMemberRepository.obtenirCotisation(2024);
+  verifier(
+    'année sans cotisation -> COTISATION_INTROUVABLE',
+    !cotisationAbsente.ok &&
+      cotisationAbsente.erreur.type === 'metier' &&
+      cotisationAbsente.erreur.code === 'COTISATION_INTROUVABLE',
+  );
+
+  const operateurInactif = await mockMemberRepository.initierPaiement({
+    type: 'COTISATION',
+    cotisation_id: cotisationId,
+    mode: 'MOBILE_MONEY',
+    operateur: 'AIRTEL_MONEY',
+    numero_telephone: '+261340000001',
+  });
+  verifier(
+    'opérateur désactivé refusé (OPERATEUR_INDISPONIBLE)',
+    !operateurInactif.ok &&
+      operateurInactif.erreur.type === 'metier' &&
+      operateurInactif.erreur.code === 'OPERATEUR_INDISPONIBLE',
+  );
+
+  const numeroInvalide = await mockMemberRepository.initierPaiement({
+    type: 'COTISATION',
+    cotisation_id: cotisationId,
+    mode: 'MOBILE_MONEY',
+    operateur: 'MVOLA',
+    numero_telephone: '0340000001',
+  });
+  verifier(
+    'numéro hors format international refusé (NUMERO_TELEPHONE_INVALIDE)',
+    !numeroInvalide.ok &&
+      numeroInvalide.erreur.type === 'metier' &&
+      numeroInvalide.erreur.code === 'NUMERO_TELEPHONE_INVALIDE',
+  );
+
+  const fraisDepot = await mockPublicContentService.estimerMontant({
+    type_operation: 'DEPOT_OEUVRE',
+    categorie_id: categorieId,
+  });
+  verifier(
+    'frais de dépôt fournis par le service (montant > 0 + mention d’estimation)',
+    fraisDepot.ok &&
+      fraisDepot.valeur.montant > 0 &&
+      fraisDepot.valeur.estimation === true &&
+      fraisDepot.valeur.mention.length > 0,
+  );
+}
+
+/**
  * Règle métier 9 — catégories multiples : appartenance unique, demande de
  * catégorie supplémentaire au statut `EN_ATTENTE` et refus des doublons.
  * S'exécute avec la session `membre@omda.mg` encore ouverte (1 catégorie ACTIVE).
@@ -1120,6 +1387,7 @@ async function scenarioMembreComptes(): Promise<void> {
 /** Espace membre : connexion + données, cotisation + notifications, comptes de test. */
 async function scenarioMembre(): Promise<void> {
   await scenarioMembreConnexion();
+  await scenarioMembreOeuvres();
   await scenarioMembreCategories();
   await scenarioDemandeCategorieOeuvres();
   await scenarioMembreCotisation();
