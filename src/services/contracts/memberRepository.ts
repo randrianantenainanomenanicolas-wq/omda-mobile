@@ -1,4 +1,5 @@
 import type {
+  AttestationDiffusion,
   Categorie,
   Cotisation,
   Membre,
@@ -91,13 +92,32 @@ export interface MemberRepository {
   /** Liste des œuvres du membre (filtrable par statut), vide si aucune. */
   listerOeuvres(entree?: ListerOeuvresEntree): Promise<Result<Oeuvre[]>>;
 
-  /** Détail d'une œuvre (statuts, motif de rejet éventuel). */
+  /**
+   * Détail d'une œuvre (statuts, motif de rejet éventuel).
+   */
   obtenirOeuvre(oeuvre_id: UUID): Promise<Result<Oeuvre>>;
+
+  /**
+   * Attestations de diffusion d'une œuvre (au moins une, règle métier 8).
+   * Elles restent REMPLAÇABLES tant que l'œuvre figure dans
+   * `STATUTS_OEUVRE_MODIFIABLES` : une œuvre conserve toujours son attestation
+   * (aucune suppression possible), l'interface ne propose que le remplacement.
+   */
+  listerAttestationsOeuvre(oeuvre_id: UUID): Promise<Result<AttestationDiffusion[]>>;
 
   /** Crée un brouillon d'œuvre (aucun envoi, aucun paiement). */
   creerOeuvre(entree: CreerOeuvreEntree): Promise<Result<Oeuvre>>;
 
-  /** Modifie un brouillon d'œuvre. */
+  /**
+   * Corrige une œuvre encore modifiable (`STATUTS_OEUVRE_MODIFIABLES` :
+   * `BROUILLON`, `ENVOYEE`, `EN_COURS_DE_VALIDATION`).
+   *
+   * Chaque champ ABSENT est conservé tel quel ; `fichier` et `attestation`
+   * REMPLACENT le document déjà enregistré (jamais de suppression : le
+   * remplacement est la seule façon de changer un document). Le statut, la date
+   * de soumission et le motif de rejet ne sont JAMAIS touchés par cette
+   * opération, qui ne déclenche aucun paiement.
+   */
   mettreAJourOeuvre(oeuvre_id: UUID, entree: MettreAJourOeuvreEntree): Promise<Result<Oeuvre>>;
 
   /**
@@ -221,11 +241,26 @@ export type CreerOeuvreEntree = {
   annee?: number | null;
 };
 
+/**
+ * Champs corrigés d'une œuvre (écran « Modifier l'œuvre »).
+ * Tout champ absent est CONSERVÉ : l'appelant n'envoie que ce qui a changé.
+ */
 export type MettreAJourOeuvreEntree = {
   titre?: string;
   categorie_id?: UUID;
   description?: string | null;
   annee?: number | null;
+  /**
+   * Remplace le fichier de l'œuvre (`chemin_fichier`, `mime_type`,
+   * `taille_octets`). Absent = le fichier actuel reste en place.
+   */
+  fichier?: FichierDepose;
+  /**
+   * Remplace l'attestation de diffusion (règle métier 8 : au moins une
+   * attestation par œuvre, jamais supprimable). Absent = l'attestation
+   * enregistrée est conservée.
+   */
+  attestation?: FichierDepose;
 };
 
 export type SoumettreOeuvreEntree = {

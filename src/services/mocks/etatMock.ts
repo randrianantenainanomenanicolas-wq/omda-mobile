@@ -1,4 +1,5 @@
 import type {
+  AttestationDiffusion,
   BucketStockage,
   Candidat,
   Cotisation,
@@ -471,6 +472,7 @@ export const compteursMock = {
   oeuvre: 0,
   notification: 0,
   categorie_membre: 0,
+  attestation: 0,
 };
 
 /** Numéro attribué au prochain dossier créé (`OMDA-2026-000008`, …). */
@@ -720,6 +722,8 @@ export async function simulerTeleversement(
 /* --------------------------------------------- Données de l'espace membre */
 
 export const oeuvresMock: Oeuvre[] = [];
+/** Attestations de diffusion des œuvres de membres (table `attestation_diffusion`). */
+export const attestationsOeuvresMock: AttestationDiffusion[] = [];
 export const cotisationsMock: Cotisation[] = [];
 export const notificationsMock: Notification[] = [];
 
@@ -755,10 +759,17 @@ export function prochainIdentifiantCategorieMembre(): UUID {
   return identifiantIncremental('e2', compteursMock.categorie_membre);
 }
 
+/** Identifiant de la prochaine attestation de diffusion créée (`e3…`). */
+export function prochainIdentifiantAttestation(): UUID {
+  compteursMock.attestation += 1;
+  return identifiantIncremental('e3', compteursMock.attestation);
+}
+
 /**
  * Crée les œuvres et cotisations du compte « complet » :
  * - 1 œuvre `VALIDEE` (dépôt payant possible), 1 `EN_COURS_DE_VALIDATION`,
  *   1 `REJETEE` avec motif ;
+ * - une attestation de diffusion par œuvre (règle métier 8) ;
  * - cotisation de l'année NON_PAYEE, cotisation précédente PAYEE.
  */
 function initialiserOeuvresEtCotisationsMock(): void {
@@ -825,6 +836,34 @@ function initialiserOeuvresEtCotisationsMock(): void {
       agent_id: null,
       created_at: '2026-07-01T06:00:00.000Z',
       updated_at: '2026-07-05T06:00:00.000Z',
+    },
+  );
+
+  /** Une attestation de diffusion par œuvre (règle métier 8). */
+  attestationsOeuvresMock.push(
+    {
+      id: prochainIdentifiantAttestation(),
+      oeuvre_id: IDS_TEST.oeuvre_validee,
+      chemin_stockage: 'oeuvres/OMDA-2026-A-000123/attestation-varangue.pdf',
+      mime_type: 'application/pdf',
+      taille_octets: 212480,
+      created_at: '2026-08-12T06:00:00.000Z',
+    },
+    {
+      id: prochainIdentifiantAttestation(),
+      oeuvre_id: IDS_TEST.oeuvre_en_validation,
+      chemin_stockage: 'oeuvres/OMDA-2026-A-000123/attestation-chant-rizieres.pdf',
+      mime_type: 'application/pdf',
+      taille_octets: 175104,
+      created_at: '2026-09-18T06:00:00.000Z',
+    },
+    {
+      id: prochainIdentifiantAttestation(),
+      oeuvre_id: IDS_TEST.oeuvre_rejetee,
+      chemin_stockage: 'oeuvres/OMDA-2026-A-000123/attestation-recit.pdf',
+      mime_type: 'application/pdf',
+      taille_octets: 40960,
+      created_at: '2026-07-02T06:00:00.000Z',
     },
   );
 
@@ -916,6 +955,42 @@ export function oeuvresDuMembre(membreId: UUID): Oeuvre[] {
   return oeuvresMock
     .filter((element) => element.membre_id === membreId)
     .sort((a, b) => b.created_at.localeCompare(a.created_at));
+}
+
+/** Attestations de diffusion d'une œuvre (les plus anciennes d'abord). */
+export function attestationsOeuvre(oeuvreId: UUID): AttestationDiffusion[] {
+  return attestationsOeuvresMock
+    .filter((element) => element.oeuvre_id === oeuvreId)
+    .sort((a, b) => a.created_at.localeCompare(b.created_at));
+}
+
+/**
+ * Remplace l'attestation de diffusion d'une œuvre : l'ancienne est OUBLIÉE.
+ * Règle métier 8 : une œuvre garde toujours une attestation — l'application
+ * mobile ne propose que le REMPLACEMENT (jamais la suppression).
+ */
+export function remplacerAttestationOeuvre(
+  oeuvreId: UUID,
+  fichier: FichierDepose,
+): AttestationDiffusion {
+  const existante = attestationsOeuvresMock.find((element) => element.oeuvre_id === oeuvreId);
+  const rang = existante ? attestationsOeuvresMock.indexOf(existante) : -1;
+
+  const attestation: AttestationDiffusion = {
+    id: existante ? existante.id : prochainIdentifiantAttestation(),
+    oeuvre_id: oeuvreId,
+    chemin_stockage: fichier.chemin_stockage,
+    mime_type: fichier.mime_type,
+    taille_octets: fichier.taille_octets,
+    created_at: maintenantISO(),
+  };
+
+  if (rang >= 0) {
+    attestationsOeuvresMock[rang] = attestation;
+  } else {
+    attestationsOeuvresMock.push(attestation);
+  }
+  return attestation;
 }
 
 /** Cotisations d'un membre (année décroissante ; vide si aucune). */

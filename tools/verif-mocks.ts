@@ -15,7 +15,7 @@ import {
 } from '../src/services/mocks';
 
 /**
- * Vérification d'exécution des mocks (smoke test) : 116 contrôles sur les 4 mocks
+ * Vérification d'exécution des mocks (smoke test) : 118 contrôles sur les 4 mocks
  * + fixtures. Lancer avec `npx --yes tsx tools/verif-mocks.ts` — sortie attendue :
  * `TOUS LES CONTROLES SONT PASSES`.
  */
@@ -838,14 +838,49 @@ async function scenarioMembreOeuvres(): Promise<void> {
       paiementOeuvreRejetee.erreur.code === 'OEUVRE_NON_VALIDEE',
   );
 
-  const modificationApresEnvoi = await mockMemberRepository.mettreAJourOeuvre(oeuvreId, {
-    titre: 'Titre interdit',
+  /** Tant que l'OMDA n'a pas statué, une œuvre ENVOYEE reste corrigeable. */
+  const fichierCorrige = {
+    chemin_stockage: 'oeuvres/corrections/poemes-cote-v2.pdf',
+    mime_type: 'application/pdf' as TypeMime,
+    taille_octets: 640000,
+  };
+  const attestationCorrigee = {
+    chemin_stockage: 'oeuvres/corrections/attestation-cote-v2.pdf',
+    mime_type: 'application/pdf' as TypeMime,
+    taille_octets: 102400,
+  };
+
+  const correctionApresEnvoi = await mockMemberRepository.mettreAJourOeuvre(oeuvreId, {
+    titre: 'Poèmes de la côte (corrigé)',
+    fichier: fichierCorrige,
+    attestation: attestationCorrigee,
   });
   verifier(
-    'œuvre envoyée non modifiable (OEUVRE_NON_MODIFIABLE)',
-    !modificationApresEnvoi.ok &&
-      modificationApresEnvoi.erreur.type === 'metier' &&
-      modificationApresEnvoi.erreur.code === 'OEUVRE_NON_MODIFIABLE',
+    'œuvre ENVOYEE corrigeable : titre, fichier et attestation remplacés, statut inchangé',
+    correctionApresEnvoi.ok &&
+      correctionApresEnvoi.valeur.titre === 'Poèmes de la côte (corrigé)' &&
+      correctionApresEnvoi.valeur.chemin_fichier === fichierCorrige.chemin_stockage &&
+      correctionApresEnvoi.valeur.taille_octets === fichierCorrige.taille_octets &&
+      correctionApresEnvoi.valeur.statut === 'ENVOYEE',
+  );
+
+  const attestationsEnregistrees = await mockMemberRepository.listerAttestationsOeuvre(oeuvreId);
+  verifier(
+    'attestation REMPLACÉE (une seule, jamais supprimée — règle métier 8)',
+    attestationsEnregistrees.ok &&
+      attestationsEnregistrees.valeur.length === 1 &&
+      attestationsEnregistrees.valeur[0].chemin_stockage === attestationCorrigee.chemin_stockage,
+  );
+
+  const oeuvreValideeFigee = await mockMemberRepository.mettreAJourOeuvre(
+    'a0000000-0000-4000-8000-000000000001',
+    { titre: 'Titre interdit' },
+  );
+  verifier(
+    'œuvre VALIDEE figée (OEUVRE_NON_MODIFIABLE)',
+    !oeuvreValideeFigee.ok &&
+      oeuvreValideeFigee.erreur.type === 'metier' &&
+      oeuvreValideeFigee.erreur.code === 'OEUVRE_NON_MODIFIABLE',
   );
 
   const renvoi = await mockMemberRepository.soumettreOeuvre({

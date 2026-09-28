@@ -246,7 +246,8 @@ export default function DepotOeuvreScreen() {
 
   /**
    * Charge les catégories ACTIVES du membre et, si un `oeuvre_id` est fourni, le
-   * brouillon à reprendre (seul un `BROUILLON` est modifiable).
+   * brouillon à reprendre (seul un `BROUILLON` se complète et s’envoie ici :
+   * les corrections d’une œuvre déjà envoyée passent par `modifier-oeuvre`).
    */
   const chargerDepot = useCallback(async () => {
     setEtat('chargement');

@@ -16,6 +16,7 @@ import {
   type StatutPill,
 } from '../../src/components/ui';
 import {
+  STATUTS_OEUVRE_MODIFIABLES,
   type Categorie,
   type Oeuvre,
   type StatutOeuvre,
@@ -31,6 +32,11 @@ import { mockMemberRepository, mockPublicContentService } from '../../src/servic
  * - l'œuvre vient de `mockMemberRepository.obtenirOeuvre(oeuvre_id)` : l'UI ne
  *   déduit jamais un statut, elle affiche celui du serveur ;
  * - les actions dépendent STRICTEMENT du statut ;
+ * - une œuvre encore `BROUILLON`, `ENVOYEE` ou `EN_COURS_DE_VALIDATION`
+ *   (`STATUTS_OEUVRE_MODIFIABLES`) reste CORRIGEABLE : « Modifier l'œuvre »
+ *   ouvre `modifier-oeuvre` (titre, catégorie, description, année, remplacement
+ *   du fichier et de l'attestation de diffusion) tant que l'OMDA n'a pas statué ;
+ *   ces écrans ne changent JAMAIS le statut, qui reste la décision du serveur ;
  * - « Payer les frais de dépôt » n'est proposé QUE pour une œuvre `VALIDEE`
  *   (règle métier 4) : l'envoi (`ENVOYEE`) ne déclenche aucun paiement ;
  * - `REJETEE` affiche obligatoirement le motif transmis par l'OMDA ;
@@ -192,6 +198,15 @@ export default function FicheOeuvreScreen() {
     router.push({ pathname: '/(membre)/depot-oeuvre', params: { oeuvre_id: oeuvre.id } });
   }, [oeuvre]);
 
+  /**
+   * Correction des informations et remplacement des documents, tant que l'OMDA
+   * n'a pas statué (`STATUTS_OEUVRE_MODIFIABLES`).
+   */
+  const modifierOeuvre = useCallback(() => {
+    if (!oeuvre) return;
+    router.push({ pathname: '/(membre)/modifier-oeuvre', params: { oeuvre_id: oeuvre.id } });
+  }, [oeuvre]);
+
   /** Œuvre rejetée : nouveau dépôt, l'œuvre rejetée reste consultable ici. */
   const nouvelDepot = useCallback(() => {
     router.push('/(membre)/depot-oeuvre');
@@ -256,6 +271,8 @@ export default function FicheOeuvreScreen() {
   const dateDecision = formaterDateCourte(oeuvre.date_decision);
   const fichier = nomFichier(oeuvre.chemin_fichier);
   const enExamen = STATUTS_EN_EXAMEN.includes(oeuvre.statut);
+  /** L'œuvre peut encore être corrigée : brouillon, envoyée ou en cours d'examen. */
+  const modifiable = STATUTS_OEUVRE_MODIFIABLES.includes(oeuvre.statut);
 
   return (
     <ScreenContainer titre="Fiche de l’œuvre" sousTitre="Espace membre">
@@ -310,6 +327,15 @@ export default function FicheOeuvreScreen() {
             pleineLargeur
             onPress={reprendreDepot}
           />
+          {modifiable ? (
+            <Button
+              libelle="Modifier les informations"
+              variante="secondary"
+              icone="floppy-disk"
+              pleineLargeur
+              onPress={modifierOeuvre}
+            />
+          ) : null}
         </View>
       ) : null}
 
@@ -318,8 +344,16 @@ export default function FicheOeuvreScreen() {
           <InfoBanner
             variante="pending"
             titre="Œuvre en cours d’examen"
-            message="L’OMDA vérifie votre œuvre. Aucun paiement n’est demandé à cette étape : les frais de dépôt ne seront proposés qu’après la validation."
+            message="L’OMDA vérifie votre œuvre. Aucun paiement n’est demandé à cette étape : les frais de dépôt ne seront proposés qu’après la validation. Corriger une information ou remplacer un document reste possible tant que la décision n’est pas rendue."
           />
+          {modifiable ? (
+            <Button
+              libelle="Modifier mon œuvre"
+              icone="pen-to-square"
+              pleineLargeur
+              onPress={modifierOeuvre}
+            />
+          ) : null}
           <Button
             libelle="Actualiser"
             variante="secondary"

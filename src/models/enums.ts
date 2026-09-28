@@ -77,6 +77,22 @@ export const STATUTS_OEUVRE = [
 ] as const;
 export type StatutOeuvre = (typeof STATUTS_OEUVRE)[number];
 
+/**
+ * Statuts pour lesquels le membre peut encore CORRIGER son œuvre : titre,
+ * catégorie, description, année, fichier de l'œuvre et attestation de diffusion
+ * (remplacement uniquement, jamais de suppression).
+ *
+ * Tant que l'OMDA n'a pas statué (`ENVOYEE` = en attente de prise en charge,
+ * `EN_COURS_DE_VALIDATION` = examen en cours), une correction reste possible.
+ * Dès `VALIDEE` (frais de dépôt à régler), `REJETEE` et `DEPOT_FINALISE`,
+ * l'œuvre est figée : le membre dépose alors une NOUVELLE œuvre.
+ */
+export const STATUTS_OEUVRE_MODIFIABLES: readonly StatutOeuvre[] = [
+  'BROUILLON',
+  'ENVOYEE',
+  'EN_COURS_DE_VALIDATION',
+];
+
 /* ------------------------------------------------------------------ Paiements */
 
 export const TYPES_PAIEMENT = ['ADHESION', 'DEPOT_OEUVRE', 'COTISATION'] as const;

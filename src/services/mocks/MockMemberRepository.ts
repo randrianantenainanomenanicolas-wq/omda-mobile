@@ -1,4 +1,5 @@
 import type {
+  AttestationDiffusion,
   Categorie,
   Cotisation,
   Membre,
@@ -10,7 +11,12 @@ import type {
   UUID,
   Utilisateur,
 } from '../../models';
-import { CODE_DEVISE_MGA, TAILLE_MAX_FICHIER_OCTETS, TYPES_MIME_AUTORISES } from '../../models';
+import {
+  CODE_DEVISE_MGA,
+  STATUTS_OEUVRE_MODIFIABLES,
+  TAILLE_MAX_FICHIER_OCTETS,
+  TYPES_MIME_AUTORISES,
+} from '../../models';
 import type {
   CategoriesMembre,
   CreerOeuvreEntree,
@@ -43,6 +49,7 @@ import { CATEGORIES_TEST, tarifApplique } from './donneesTestMock';
 import {
   ajouterAppartenanceCategorie,
   appliquerEffetsPaiementReussi,
+  attestationsOeuvre,
   avancerPaiement,
   candidatParUtilisateur,
   categoriesDuMembre,
@@ -66,6 +73,7 @@ import {
   preparerAppelMock,
   prochainIdentifiantOeuvre,
   refusMock,
+  remplacerAttestationOeuvre,
   simulerTeleversement,
   utilisateurCourant,
 } from './etatMock';
@@ -95,6 +103,23 @@ function sessionRequise(): ResultErr {
     CODES_ERREUR_MEMBRE.NON_AUTHENTIFIE,
     'Vous devez être connecté pour accéder à cette information.',
   );
+}
+
+/**
+ * Œuvre du MEMBRE connecté, ou `null` : les œuvres d'un autre membre sont
+ * invisibles (même refus que pour une œuvre inexistante).
+ */
+function oeuvreDuMembre(contexte: ContexteMembre, oeuvreId: UUID): Oeuvre | null {
+  return (
+    oeuvresMock.find(
+      (element) => element.id === oeuvreId && element.membre_id === contexte.membre.id,
+    ) ?? null
+  );
+}
+
+/** Refus métier standard d'une œuvre inconnue ou n'appartenant pas au membre. */
+function refusOeuvreIntrouvable(): ResultErr {
+  return erreurMetier(CODES_ERREUR_MEMBRE.OEUVRE_INTROUVABLE, 'Cette œuvre est introuvable.');
 }
 
 /** Catégories du membre (référentiel + statut de chaque appartenance) d'un contexte. */
@@ -480,16 +505,33 @@ export class MockMemberRepository implements MemberRepository {
       return sessionRequise();
     }
 
-    const oeuvre = oeuvresMock.find(
-      (element) => element.id === oeuvre_id && element.membre_id === contexte.membre.id,
-    );
+    const oeuvre = oeuvreDuMembre(contexte, oeuvre_id);
     if (!oeuvre) {
-      return erreurMetier(
-        CODES_ERREUR_MEMBRE.OEUVRE_INTROUVABLE,
-        'Cette œuvre est introuvable.',
-      );
+      return refusOeuvreIntrouvable();
     }
     return ok(oeuvre);
+  }
+
+  /**
+   * Attestations de diffusion d'une œuvre (règle métier 8 : au moins une).
+   * Elles ne sont jamais supprimées : l'écran « Modifier l'œuvre » ne propose
+   * que le remplacement tant que le statut est modifiable.
+   */
+  async listerAttestationsOeuvre(oeuvre_id: UUID): Promise<Result<AttestationDiffusion[]>> {
+    const panne = await preparerAppelMock();
+    if (panne) {
+      return panne;
+    }
+    const contexte = contexteMembre();
+    if (!contexte) {
+      return sessionRequise();
+    }
+
+    const oeuvre = oeuvreDuMembre(contexte, oeuvre_id);
+    if (!oeuvre) {
+      return refusOeuvreIntrouvable();
+    }
+    return ok(attestationsOeuvre(oeuvre.id));
   }
 
   /** Crée un brouillon d'œuvre : aucun envoi, aucun paiement (règle métier 4). */
@@ -527,7 +569,16 @@ export class MockMemberRepository implements MemberRepository {
     return ok(oeuvre);
   }
 
-  /** Modifie un brouillon ; une œuvre déjà envoyée n'est plus modifiable. */
+  /**
+   * Corrige une œuvre encore modifiable (`STATUTS_OEUVRE_MODIFIABLES`) : tant
+   * que l'OMDA n'a pas statué — `BROUILLON`, `ENVOYEE`, `EN_COURS_DE_VALIDATION`
+   * — le membre peut corriger le titre, la catégorie, la description, l'année et
+   * REMPLACER le fichier de l'œuvre ou son attestation de diffusion.
+   *
+   * ⚠️ Un document n'est jamais supprimé : seul le remplacement est offert
+   * (règle métier 8). Le statut et la date de soumission ne bougent pas et une
+   * correction ne déclenche aucun paiement.
+   */
   async mettreAJourOeuvre(
     oeuvre_id: UUID,
     entree: MettreAJourOeuvreEntree,
@@ -541,19 +592,14 @@ export class MockMemberRepository implements MemberRepository {
       return sessionRequise();
     }
 
-    const oeuvre = oeuvresMock.find(
-      (element) => element.id === oeuvre_id && element.membre_id === contexte.membre.id,
-    );
+    const oeuvre = oeuvreDuMembre(contexte, oeuvre_id);
     if (!oeuvre) {
-      return erreurMetier(
-        CODES_ERREUR_MEMBRE.OEUVRE_INTROUVABLE,
-        'Cette œuvre est introuvable.',
-      );
+      return refusOeuvreIntrouvable();
     }
-    if (oeuvre.statut !== 'BROUILLON') {
+    if (!STATUTS_OEUVRE_MODIFIABLES.includes(oeuvre.statut)) {
       return refusMock(
         CODES_MOCK.OEUVRE_NON_MODIFIABLE,
-        'Cette œuvre a déjà été envoyée : elle n’est plus modifiable.',
+        'Cette œuvre a déjà été traitée par l’OMDA : elle n’est plus modifiable depuis cet écran.',
       );
     }
 
@@ -569,12 +615,25 @@ export class MockMemberRepository implements MemberRepository {
     if (entree.annee !== undefined) {
       oeuvre.annee = entree.annee;
     }
+    /** Remplacement du fichier de l'œuvre (l'ancien n'est plus référencé). */
+    if (entree.fichier !== undefined) {
+      oeuvre.chemin_fichier = entree.fichier.chemin_stockage;
+      oeuvre.mime_type = entree.fichier.mime_type;
+      oeuvre.taille_octets = entree.fichier.taille_octets;
+    }
+    /** Remplacement de l'attestation de diffusion (jamais de suppression). */
+    if (entree.attestation !== undefined) {
+      remplacerAttestationOeuvre(oeuvre.id, entree.attestation);
+    }
+
     oeuvre.updated_at = maintenantISO();
     return ok(oeuvre);
   }
 
   /**
-   * Envoie l'œuvre (`ENVOYEE`) avec son fichier et au moins une attestation.
+   * Envoie l'œuvre (`ENVOYEE`) avec son fichier et au moins une attestation de
+   * diffusion, qui est ENREGISTRÉE (elle restera remplaçable tant que l'œuvre
+   * est modifiable, jamais supprimable).
    * ⚠️ Aucun paiement n'est déclenché à l'envoi : le paiement des frais de
    * dépôt n'est proposé qu'après `VALIDEE`.
    */
@@ -588,14 +647,9 @@ export class MockMemberRepository implements MemberRepository {
       return sessionRequise();
     }
 
-    const oeuvre = oeuvresMock.find(
-      (element) => element.id === entree.oeuvre_id && element.membre_id === contexte.membre.id,
-    );
+    const oeuvre = oeuvreDuMembre(contexte, entree.oeuvre_id);
     if (!oeuvre) {
-      return erreurMetier(
-        CODES_ERREUR_MEMBRE.OEUVRE_INTROUVABLE,
-        'Cette œuvre est introuvable.',
-      );
+      return refusOeuvreIntrouvable();
     }
     if (oeuvre.statut !== 'BROUILLON') {
       return refusMock(
@@ -610,6 +664,8 @@ export class MockMemberRepository implements MemberRepository {
       );
     }
 
+    /** Attestation de diffusion enregistrée avec l'œuvre (règle métier 8). */
+    const [attestation] = entree.attestations;
     const dateSoumission = maintenantISO();
     oeuvre.chemin_fichier = entree.fichier.chemin_stockage;
     oeuvre.mime_type = entree.fichier.mime_type;
@@ -617,6 +673,7 @@ export class MockMemberRepository implements MemberRepository {
     oeuvre.statut = 'ENVOYEE';
     oeuvre.date_soumission = dateSoumission;
     oeuvre.updated_at = dateSoumission;
+    remplacerAttestationOeuvre(oeuvre.id, attestation);
     return ok(oeuvre);
   }
 
