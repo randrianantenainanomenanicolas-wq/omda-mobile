@@ -21,11 +21,26 @@ export type StatutUtilisateur = (typeof STATUTS_UTILISATEUR)[number];
 /**
  * Statut d'une appartenance membre ↔ catégorie (`membre_categorie.statut`).
  *
- * `EN_ATTENTE` : demande de catégorie supplémentaire envoyée depuis l'application
- * (règle métier 9), en attente de la décision d'un agent OMDA ; aucune validation
- * n'est faite localement.
+ * - `ACTIVE`     : catégorie validée, le membre en bénéficie ;
+ * - `EN_ATTENTE` : demande de catégorie supplémentaire envoyée depuis
+ *                  l'application (règle métier 9), en attente de la décision
+ *                  d'un agent OMDA ;
+ * - `INACTIVE`   : catégorie retirée par l'OMDA ;
+ * - `REJETEE`    : demande refusée par un agent OMDA ;
+ * - `ANNULEE`    : demande retirée par le membre tant qu'elle était `EN_ATTENTE`.
+ *
+ * Aucune validation n'est faite localement : l'application ne fait JAMAIS passer
+ * une demande à `ACTIVE` — seul le serveur (décision d'un agent OMDA) décide.
+ * Une appartenance `ANNULEE` ou `REJETEE` reste réouvrable : le membre peut
+ * redéposer une demande pour la même catégorie.
  */
-export const STATUTS_ADHESION_CATEGORIE = ['ACTIVE', 'EN_ATTENTE', 'INACTIVE'] as const;
+export const STATUTS_ADHESION_CATEGORIE = [
+  'ACTIVE',
+  'EN_ATTENTE',
+  'INACTIVE',
+  'REJETEE',
+  'ANNULEE',
+] as const;
 export type StatutAdhesionCategorie = (typeof STATUTS_ADHESION_CATEGORIE)[number];
 
 /* ------------------------------------------------------------------- Demandes */

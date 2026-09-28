@@ -7,13 +7,14 @@ import {
   mockCandidateApi,
   mockMemberRepository,
   mockPublicContentService,
+  oeuvresDemandeCategorieMock,
   reinitialiserEchecsConnexion,
   reinitialiserOptionsMock,
   simulerVirementValideParAgent,
 } from '../src/services/mocks';
 
 /**
- * Vérification d'exécution des mocks (smoke test) : 84 contrôles sur les 4 mocks
+ * Vérification d'exécution des mocks (smoke test) : 97 contrôles sur les 4 mocks
  * + fixtures. Lancer avec `npx --yes tsx tools/verif-mocks.ts` — sortie attendue :
  * `TOUS LES CONTROLES SONT PASSES`.
  */
@@ -737,6 +738,193 @@ async function scenarioMembreCategories(): Promise<void> {
   );
 }
 
+/** Œuvre jointe telle que transmise à `demanderCategorieSupplementaireAvecOeuvres`. */
+type OeuvreDemandeTest = Parameters<
+  typeof mockMemberRepository.demanderCategorieSupplementaireAvecOeuvres
+>[0]['oeuvres'][number];
+
+/** Œuvre complète : titre + fichier + attestation de diffusion (2 fichiers déposés). */
+function oeuvreCompleteTest(titre: string): OeuvreDemandeTest {
+  return {
+    titre,
+    fichier: {
+      chemin_stockage: `oeuvres/${titre}.mp3`,
+      mime_type: 'audio/mpeg',
+      taille_octets: 3500000,
+    },
+    attestation: {
+      chemin_stockage: `oeuvres/${titre}-attestation.pdf`,
+      mime_type: 'application/pdf',
+      taille_octets: 420000,
+    },
+  };
+}
+
+/**
+ * Règles métier 9 + 8 étendues — demande de catégorie AVEC œuvres jointes et
+ * annulation : minimum 2 œuvres, complétude (titre / fichier / attestation),
+ * limite de 20 Mo revalidée, création `EN_ATTENTE` avec œuvres jointes en
+ * mémoire, annulation → `ANNULEE` (+ œuvres retirées), refus d'annulation hors
+ * `EN_ATTENTE`, et réouverture d'une demande annulée.
+ * S'exécute avec la session `membre@omda.mg` encore ouverte (1 ACTIVE +
+ * 1 EN_ATTENTE issues du scénario précédent ; cat_3333 reste libre).
+ */
+async function scenarioDemandeCategorieOeuvres(): Promise<void> {
+  const categorieLibre = '33333333-3333-4333-8333-333333333333';
+
+  const uneSeule = await mockMemberRepository.demanderCategorieSupplementaireAvecOeuvres({
+    categorie_id: categorieLibre,
+    oeuvres: [oeuvreCompleteTest('oeuvre-seule')],
+  });
+  verifier(
+    'demande avec 1 seule œuvre -> OEUVRE_MINIMUM_REQUIS',
+    !uneSeule.ok &&
+      uneSeule.erreur.type === 'metier' &&
+      uneSeule.erreur.code === 'OEUVRE_MINIMUM_REQUIS',
+  );
+
+  const titreManquant = await mockMemberRepository.demanderCategorieSupplementaireAvecOeuvres({
+    categorie_id: categorieLibre,
+    oeuvres: [{ ...oeuvreCompleteTest('sans-titre'), titre: '   ' }, oeuvreCompleteTest('b')],
+  });
+  verifier(
+    'œuvre sans titre -> OEUVRE_INCOMPLETE',
+    !titreManquant.ok &&
+      titreManquant.erreur.type === 'metier' &&
+      titreManquant.erreur.code === 'OEUVRE_INCOMPLETE',
+  );
+
+  const sansAttestation = await mockMemberRepository.demanderCategorieSupplementaireAvecOeuvres({
+    categorie_id: categorieLibre,
+    oeuvres: [
+      oeuvreCompleteTest('a'),
+      {
+        ...oeuvreCompleteTest('b'),
+        attestation: {
+          chemin_stockage: '',
+          mime_type: 'application/pdf',
+          taille_octets: 420000,
+        },
+      },
+    ],
+  });
+  verifier(
+    '2 œuvres dont 1 sans attestation -> ATTESTATION_MANQUANTE',
+    !sansAttestation.ok &&
+      sansAttestation.erreur.type === 'metier' &&
+      sansAttestation.erreur.code === 'ATTESTATION_MANQUANTE',
+  );
+
+  const tropVolumineuse = await mockMemberRepository.demanderCategorieSupplementaireAvecOeuvres({
+    categorie_id: categorieLibre,
+    oeuvres: [
+      {
+        ...oeuvreCompleteTest('a'),
+        fichier: { ...oeuvreCompleteTest('a').fichier, taille_octets: 26214400 },
+      },
+      oeuvreCompleteTest('b'),
+    ],
+  });
+  verifier(
+    'fichier de 25 Mo -> FICHIER_TROP_VOLUMINEUX (revalidation)',
+    !tropVolumineuse.ok &&
+      tropVolumineuse.erreur.type === 'metier' &&
+      tropVolumineuse.erreur.code === 'FICHIER_TROP_VOLUMINEUX',
+  );
+
+  const demande = await mockMemberRepository.demanderCategorieSupplementaireAvecOeuvres({
+    categorie_id: categorieLibre,
+    oeuvres: [oeuvreCompleteTest('a'), oeuvreCompleteTest('b')],
+  });
+  verifier(
+    'demande avec 2 œuvres complètes -> EN_ATTENTE',
+    demande.ok &&
+      demande.valeur.statut === 'EN_ATTENTE' &&
+      demande.valeur.categorie_id === categorieLibre,
+  );
+  verifier(
+    'œuvres jointes enregistrées côté « serveur » (2)',
+    demande.ok && (oeuvresDemandeCategorieMock.get(demande.valeur.id)?.length ?? -1) === 2,
+  );
+
+  const doublon = await mockMemberRepository.demanderCategorieSupplementaireAvecOeuvres({
+    categorie_id: categorieLibre,
+    oeuvres: [oeuvreCompleteTest('a'), oeuvreCompleteTest('b')],
+  });
+  verifier(
+    'seconde demande pour la même catégorie -> CATEGORIE_DEJA_DEMANDEE',
+    !doublon.ok &&
+      doublon.erreur.type === 'metier' &&
+      doublon.erreur.code === 'CATEGORIE_DEJA_DEMANDEE',
+  );
+
+  if (demande.ok) {
+    const annulee = await mockMemberRepository.annulerDemandeCategorie(demande.valeur.id);
+    verifier(
+      'annulation d’une demande EN_ATTENTE -> ANNULEE (enregistrement conservé)',
+      annulee.ok &&
+        annulee.valeur.statut === 'ANNULEE' &&
+        annulee.valeur.id === demande.valeur.id,
+    );
+    verifier(
+      'œuvres jointes retirées après annulation (0)',
+      (oeuvresDemandeCategorieMock.get(demande.valeur.id)?.length ?? -1) === 0,
+    );
+
+    const reannulation = await mockMemberRepository.annulerDemandeCategorie(demande.valeur.id);
+    verifier(
+      'demande déjà ANNULEE -> DEMANDE_NON_ANNUABLE',
+      !reannulation.ok &&
+        reannulation.erreur.type === 'metier' &&
+        reannulation.erreur.code === 'DEMANDE_NON_ANNUABLE',
+    );
+
+    const inconnue = await mockMemberRepository.annulerDemandeCategorie(
+      'ffffffff-ffff-4fff-8fff-ffffffffffff',
+    );
+    verifier(
+      'demande inconnue -> DEMANDE_CATEGORIE_INTROUVABLE',
+      !inconnue.ok &&
+        inconnue.erreur.type === 'metier' &&
+        inconnue.erreur.code === 'DEMANDE_CATEGORIE_INTROUVABLE',
+    );
+
+    const reouverture = await mockMemberRepository.demanderCategorieSupplementaireAvecOeuvres({
+      categorie_id: categorieLibre,
+      oeuvres: [oeuvreCompleteTest('a'), oeuvreCompleteTest('b')],
+    });
+    verifier(
+      'demande réouvrable après annulation -> nouvel EN_ATTENTE avec œuvres',
+      reouverture.ok &&
+        reouverture.valeur.statut === 'EN_ATTENTE' &&
+        reouverture.valeur.id === demande.valeur.id &&
+        (oeuvresDemandeCategorieMock.get(reouverture.valeur.id)?.length ?? -1) === 2,
+    );
+  } else {
+    verifier('annulation / réouverture (non exécutable sans demande valide)', false, 'échec');
+  }
+
+  const appartenances = await mockMemberRepository.listerCategoriesMembre();
+  const active = appartenances.ok
+    ? appartenances.valeur.membre_categories.find((element) => element.statut === 'ACTIVE')
+    : undefined;
+  if (active) {
+    const annulationActive = await mockMemberRepository.annulerDemandeCategorie(active.id);
+    verifier(
+      'catégorie ACTIVE -> annulation refusée (DEMANDE_NON_ANNUABLE)',
+      !annulationActive.ok &&
+        annulationActive.erreur.type === 'metier' &&
+        annulationActive.erreur.code === 'DEMANDE_NON_ANNUABLE',
+    );
+  } else {
+    verifier(
+      'catégorie ACTIVE -> annulation refusée (DEMANDE_NON_ANNUABLE)',
+      false,
+      'aucune appartenance ACTIVE',
+    );
+  }
+}
+
 async function scenarioMembreCotisation(): Promise<void> {
   const cotisations = await mockMemberRepository.listerCotisations({ annee: 2026 });
   verifier(
@@ -933,6 +1121,7 @@ async function scenarioMembreComptes(): Promise<void> {
 async function scenarioMembre(): Promise<void> {
   await scenarioMembreConnexion();
   await scenarioMembreCategories();
+  await scenarioDemandeCategorieOeuvres();
   await scenarioMembreCotisation();
   await scenarioMembreComptes();
 }

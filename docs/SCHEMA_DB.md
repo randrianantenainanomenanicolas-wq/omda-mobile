@@ -101,7 +101,9 @@ CREATE TYPE statut_cotisation AS ENUM (
 CREATE TYPE statut_adhesion_categorie AS ENUM (
   'ACTIVE',
   'EN_ATTENTE',
-  'INACTIVE'
+  'INACTIVE',
+  'REJETEE',
+  'ANNULEE'
 );
 
 CREATE TYPE type_notification AS ENUM (

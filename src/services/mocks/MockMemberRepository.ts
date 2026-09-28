@@ -1,8 +1,20 @@
-import type { Categorie, Cotisation, Membre, MembreCategorie, Notification, Oeuvre, Paiement, UUID, Utilisateur } from '../../models';
-import { CODE_DEVISE_MGA } from '../../models';
+import type {
+  Categorie,
+  Cotisation,
+  Membre,
+  MembreCategorie,
+  Notification,
+  Oeuvre,
+  Paiement,
+  TypeMime,
+  UUID,
+  Utilisateur,
+} from '../../models';
+import { CODE_DEVISE_MGA, TAILLE_MAX_FICHIER_OCTETS, TYPES_MIME_AUTORISES } from '../../models';
 import type {
   CategoriesMembre,
   CreerOeuvreEntree,
+  DemandeCategorieOeuvresEntree,
   FichierTeleverse,
   InitierPaiementMembreEntree,
   ListerCotisationsEntree,
@@ -12,6 +24,7 @@ import type {
   MettreAJourOeuvreEntree,
   MiseAJourProfilEntree,
   OptionsTeleversement,
+  OeuvreDemandeCategorieEntree,
   ProfilMembre,
   SoumettreOeuvreEntree,
   TableauDeBordEntree,
@@ -33,9 +46,11 @@ import {
   avancerPaiement,
   candidatParUtilisateur,
   categoriesDuMembre,
+  changerStatutAppartenanceCategorie,
   CODES_MOCK,
   cotisationsDuMembre,
   cotisationsMock,
+  definirOeuvresDemandeCategorie,
   estOperateurActif,
   genererUUID,
   membreCourant,
@@ -57,6 +72,12 @@ import {
 
 /** Contexte de la session membre (utilisateur + profil adhérent). */
 type ContexteMembre = { utilisateur: Utilisateur; membre: Membre };
+
+/**
+ * Nombre minimum d'œuvres exigé pour une demande de catégorie supplémentaire
+ * (règle métier 9 étendue : « ≥ 2 œuvres, 1 attestation par œuvre »).
+ */
+const NOMBRE_MINIMUM_OEUVRES_CATEGORIE = 2;
 
 /** Contexte courant, ou `null` si personne n'est connecté. */
 function contexteMembre(): ContexteMembre | null {
@@ -102,6 +123,122 @@ function profilDepuisContexte(contexte: ContexteMembre): ProfilMembre {
 }
 
 /**
+ * Refus communs à toute demande de catégorie supplémentaire (variante simple ou
+ * avec œuvres) : catégorie inconnue ou désactivée, déjà `ACTIVE`/`INACTIVE` au
+ * profil, ou demande déjà `EN_ATTENTE`.
+ *
+ * Une appartenance `ANNULEE` ou `REJETEE` reste réouvrable : le membre peut
+ * redéposer une demande pour la même catégorie. Retourne `null` lorsque la
+ * demande peut être déposée.
+ */
+function refusDemandeCategorie(membreId: UUID, categorie_id: UUID): ResultErr | null {
+  const categorie = CATEGORIES_TEST.find(
+    (element) => element.id === categorie_id && element.actif,
+  );
+  if (!categorie) {
+    return erreurMetier(
+      CODES_ERREUR_MEMBRE.CATEGORIE_INDISPONIBLE,
+      'Cette catégorie n’est pas proposée actuellement.',
+    );
+  }
+
+  const existante = categoriesDuMembre(membreId).find(
+    (appartenance) => appartenance.categorie_id === categorie_id,
+  );
+  if (!existante) {
+    return null;
+  }
+  if (existante.statut === 'EN_ATTENTE') {
+    return erreurMetier(
+      CODES_ERREUR_MEMBRE.CATEGORIE_DEJA_DEMANDEE,
+      'Une demande est déjà en attente pour cette catégorie.',
+    );
+  }
+  if (existante.statut !== 'ANNULEE' && existante.statut !== 'REJETEE') {
+    return erreurMetier(
+      CODES_ERREUR_MEMBRE.CATEGORIE_DEJA_ENREGISTREE,
+      'Cette catégorie figure déjà dans votre profil.',
+    );
+  }
+  return null;
+}
+
+/** Un type MIME appartient-il au bucket `oeuvres` (œuvres et attestations) ? */
+function mimeAutoriseOeuvre(mime: TypeMime): boolean {
+  return (TYPES_MIME_AUTORISES.oeuvres as readonly string[]).includes(mime);
+}
+
+/**
+ * Exigences de la règle métier 9 étendue : AU MOINS 2 œuvres, chacune avec un
+ * titre, un fichier téléversé et son attestation de diffusion (règle métier 8).
+ * Revalide côté « serveur » ce que l'écran contrôle déjà (taille 20 Mo, MIME).
+ */
+function refusOeuvresDemande(oeuvres: OeuvreDemandeCategorieEntree[]): ResultErr | null {
+  if (oeuvres.length < NOMBRE_MINIMUM_OEUVRES_CATEGORIE) {
+    return erreurMetier(
+      CODES_ERREUR_MEMBRE.OEUVRE_MINIMUM_REQUIS,
+      'Joignez au moins 2 œuvres à votre demande de catégorie.',
+    );
+  }
+
+  for (const oeuvre of oeuvres) {
+    const titre = oeuvre.titre.trim();
+    if (!titre) {
+      return erreurMetier(CODES_ERREUR_MEMBRE.OEUVRE_INCOMPLETE, 'Chaque œuvre doit être titrée.');
+    }
+    if (!oeuvre.fichier.chemin_stockage) {
+      return erreurMetier(
+        CODES_ERREUR_MEMBRE.OEUVRE_INCOMPLETE,
+        `Le fichier de l’œuvre « ${titre} » est manquant.`,
+      );
+    }
+    if (!oeuvre.attestation.chemin_stockage) {
+      return erreurMetier(
+        CODES_ERREUR_MEMBRE.ATTESTATION_MANQUANTE,
+        `Joignez une attestation de diffusion à l’œuvre « ${titre} ».`,
+      );
+    }
+
+    for (const fichier of [oeuvre.fichier, oeuvre.attestation]) {
+      if (fichier.taille_octets > TAILLE_MAX_FICHIER_OCTETS) {
+        return erreurMetier(
+          CODES_ERREUR_MEMBRE.FICHIER_TROP_VOLUMINEUX,
+          'Un fichier dépasse la taille maximale de 20 Mo.',
+        );
+      }
+      if (!mimeAutoriseOeuvre(fichier.mime_type)) {
+        return erreurMetier(
+          CODES_ERREUR_MEMBRE.TYPE_FICHIER_NON_AUTORISE,
+          'Un fichier n’a pas un format accepté pour les œuvres (MP3, WAV, PDF, JPEG ou PNG).',
+        );
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * Crée l'appartenance `EN_ATTENTE` d'une demande (ou rouvre l'existence
+ * `ANNULEE` / `REJETEE` après vérification par `refusDemandeCategorie`).
+ */
+function ouvrirDemandeCategorie(
+  contexte: ContexteMembre,
+  categorie_id: UUID,
+): MembreCategorie {
+  const existante = categoriesDuMembre(contexte.membre.id).find(
+    (appartenance) => appartenance.categorie_id === categorie_id,
+  );
+  if (existante) {
+    return changerStatutAppartenanceCategorie(existante.id, 'EN_ATTENTE') ?? existante;
+  }
+  return ajouterAppartenanceCategorie({
+    membre_id: contexte.membre.id,
+    categorie_id,
+    statut: 'EN_ATTENTE',
+  });
+}
+
+/**
  * `MemberRepository` simulé (Supabase côté réel : Auth + Postgres + Storage).
  *
  * ⚠️ Règles métier simulées :
@@ -142,10 +279,11 @@ export class MockMemberRepository implements MemberRepository {
   }
 
   /**
-   * Demande de catégorie supplémentaire (règle métier 9) : la catégorie doit
-   * être active au référentiel et ne pas déjà figurer au profil (dans aucun
-   * statut). L'appartenance est créée au statut `EN_ATTENTE` : seul un agent
-   * OMDA décidera de son activation (aucune validation locale).
+   * Demande de catégorie supplémentaire (règle métier 9) — variante SANS
+   * œuvres, conservée pour compatibilité (tests, anciens appels). La catégorie
+   * doit être active au référentiel et ne pas déjà figurer au profil (ni
+   * `ACTIVE` ni `EN_ATTENTE`) ; l'appartenance est créée au statut `EN_ATTENTE`
+   * et seul un agent OMDA décidera de son activation (aucune validation locale).
    */
   async demanderCategorieSupplementaire(categorie_id: UUID): Promise<Result<MembreCategorie>> {
     const panne = await preparerAppelMock();
@@ -157,38 +295,108 @@ export class MockMemberRepository implements MemberRepository {
       return sessionRequise();
     }
 
-    const categorie = CATEGORIES_TEST.find(
-      (element) => element.id === categorie_id && element.actif,
+    const refus = refusDemandeCategorie(contexte.membre.id, categorie_id);
+    if (refus) {
+      return refus;
+    }
+
+    return ok(ouvrirDemandeCategorie(contexte, categorie_id));
+  }
+
+  /**
+   * Demande de catégorie supplémentaire AVEC pièces jointes (règle métier 9
+   * étendue, écrans `demander-categorie` puis `demander-categorie-oeuvres`) :
+   * au moins 2 œuvres, chacune avec un titre, un fichier et une attestation de
+   * diffusion (règle métier 8).
+   *
+   * Valide dans l'ordre : catégorie (codes `CATEGORIE_*`), nombre d'œuvres
+   * (`OEUVRE_MINIMUM_REQUIS`), complétude de chaque œuvre (`OEUVRE_INCOMPLETE` /
+   * `ATTESTATION_MANQUANTE`) puis taille (20 Mo) et format (`FICHIER_TROP_VOLUMINEUX`
+   * / `TYPE_FICHIER_NON_AUTORISE`). L'appartenance est créée ou rouverte au
+   * statut `EN_ATTENTE` et les œuvres jointes sont enregistrées dans l'état du
+   * mock ; aucune ligne `oeuvre` n'est créée et aucun statut `ACTIVE` n'est
+   * appliqué localement.
+   */
+  async demanderCategorieSupplementaireAvecOeuvres(
+    entree: DemandeCategorieOeuvresEntree,
+  ): Promise<Result<MembreCategorie>> {
+    const panne = await preparerAppelMock();
+    if (panne) {
+      return panne;
+    }
+    const contexte = contexteMembre();
+    if (!contexte) {
+      return sessionRequise();
+    }
+
+    const refusCategorie = refusDemandeCategorie(contexte.membre.id, entree.categorie_id);
+    if (refusCategorie) {
+      return refusCategorie;
+    }
+
+    const refusOeuvres = refusOeuvresDemande(entree.oeuvres);
+    if (refusOeuvres) {
+      return refusOeuvres;
+    }
+
+    const appartenance = ouvrirDemandeCategorie(contexte, entree.categorie_id);
+    definirOeuvresDemandeCategorie(
+      appartenance.id,
+      entree.oeuvres.map((oeuvre) => ({
+        titre: oeuvre.titre.trim(),
+        fichier: oeuvre.fichier,
+        attestation: oeuvre.attestation,
+        created_at: maintenantISO(),
+      })),
     );
-    if (!categorie) {
+
+    return ok(appartenance);
+  }
+
+  /**
+   * Annulation d'une demande `EN_ATTENTE` par le membre (règle métier 9) :
+   * l'appartenance passe au statut `ANNULEE` (l'enregistrement est conservé,
+   * jamais supprimé) et les œuvres jointes sont retirées de la demande.
+   * Seules les demandes `EN_ATTENTE` sont annulables ; une catégorie `ACTIVE` ou
+   * `INACTIVE` relève de l'agent OMDA (code `DEMANDE_NON_ANNUABLE`). Une demande
+   * annulée reste réouvrable depuis « Demander une catégorie supplémentaire ».
+   */
+  async annulerDemandeCategorie(membre_categorie_id: UUID): Promise<Result<MembreCategorie>> {
+    const panne = await preparerAppelMock();
+    if (panne) {
+      return panne;
+    }
+    const contexte = contexteMembre();
+    if (!contexte) {
+      return sessionRequise();
+    }
+
+    const appartenance = categoriesDuMembre(contexte.membre.id).find(
+      (element) => element.id === membre_categorie_id,
+    );
+    if (!appartenance) {
       return erreurMetier(
-        CODES_ERREUR_MEMBRE.CATEGORIE_INDISPONIBLE,
-        'Cette catégorie n’est pas proposée actuellement.',
+        CODES_ERREUR_MEMBRE.DEMANDE_CATEGORIE_INTROUVABLE,
+        'Cette demande de catégorie est introuvable.',
+      );
+    }
+    if (appartenance.statut !== 'EN_ATTENTE') {
+      return erreurMetier(
+        CODES_ERREUR_MEMBRE.DEMANDE_NON_ANNUABLE,
+        'Seule une demande encore en attente peut être annulée.',
       );
     }
 
-    const existante = categoriesDuMembre(contexte.membre.id).find(
-      (appartenance) => appartenance.categorie_id === categorie_id,
-    );
-    if (existante) {
-      return existante.statut === 'EN_ATTENTE'
-        ? erreurMetier(
-            CODES_ERREUR_MEMBRE.CATEGORIE_DEJA_DEMANDEE,
-            'Une demande est déjà en attente pour cette catégorie.',
-          )
-        : erreurMetier(
-            CODES_ERREUR_MEMBRE.CATEGORIE_DEJA_ENREGISTREE,
-            'Cette catégorie figure déjà dans votre profil.',
-          );
+    const annulee = changerStatutAppartenanceCategorie(appartenance.id, 'ANNULEE');
+    if (!annulee) {
+      return erreurMetier(
+        CODES_ERREUR_MEMBRE.DEMANDE_CATEGORIE_INTROUVABLE,
+        'Cette demande de catégorie est introuvable.',
+      );
     }
+    definirOeuvresDemandeCategorie(appartenance.id, []);
 
-    return ok(
-      ajouterAppartenanceCategorie({
-        membre_id: contexte.membre.id,
-        categorie_id,
-        statut: 'EN_ATTENTE',
-      }),
-    );
+    return ok(annulee);
   }
 
   /** Seul le téléphone est modifiable par le membre (le reste vient du dossier). */

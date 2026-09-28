@@ -42,6 +42,8 @@ const STATUTS_CATEGORIE: Record<StatutAdhesionCategorie, { variante: StatutPill;
   ACTIVE: { variante: 'success', libelle: 'Catégorie active' },
   EN_ATTENTE: { variante: 'pending', libelle: 'Demande en attente' },
   INACTIVE: { variante: 'info', libelle: 'Catégorie inactive' },
+  REJETEE: { variante: 'error', libelle: 'Demande refusée' },
+  ANNULEE: { variante: 'info', libelle: 'Demande annulée' },
 };
 
 /** Libellés lisibles des rôles (`ROLES_UTILISATEUR`). */
@@ -80,12 +82,20 @@ function formaterDateCourte(dateIso: string | null): string {
 
 /**
  * Phrase de statut horodatée sous chaque catégorie : activation datée, demande
- * récente (règle métier 9) ou simple enregistrement.
+ * récente (règle métier 9), demande annulée ou refusée par l'OMDA, ou simple
+ * enregistrement. `date_activation` porte l'horodatage du dernier changement de
+ * statut côté « serveur ».
  */
 function phraseCategorie(statut: StatutAdhesionCategorie | undefined, date: string): string {
   if (statut === 'ACTIVE') return `Membre de cette catégorie depuis le ${date}.`;
   if (statut === 'EN_ATTENTE') {
     return `Demande envoyée le ${date} : en attente de la décision d’un agent OMDA.`;
+  }
+  if (statut === 'ANNULEE') {
+    return `Demande annulée le ${date} : vous pouvez la demander à nouveau.`;
+  }
+  if (statut === 'REJETEE') {
+    return `Demande refusée par l’OMDA le ${date} : vous pouvez la redemander.`;
   }
   return `Catégorie enregistrée le ${date}.`;
 }
@@ -145,8 +155,10 @@ function TitreSection({ icone, titre, mention }: PropsTitreSection) {
  * date de naissance viennent du dossier candidat et restent en lecture seule.
  *
  * Section « Mes catégories » (règle métier 9) : toutes les catégories du membre
- * avec leur statut (`ACTIVE`, `EN_ATTENTE`, `INACTIVE`) et accès à l'écran
- * `/(membre)/demander-categorie` pour demander une catégorie supplémentaire.
+ * avec leur statut (`ACTIVE`, `EN_ATTENTE`, `INACTIVE`, `REJETEE`, `ANNULEE`),
+ * accès à l'écran `/(membre)/demander-categorie` (choix → œuvres → envoi) et
+ * annulation — avec confirmation dans l'écran — d'une demande `EN_ATTENTE`
+ * (`annulerDemandeCategorie`, statut `ANNULEE`, catégorie redevient demandable).
  *
  * États obligatoires : `LoadingState`, `ErrorState` + « Réessayer », `EmptyState`
  * (aucune catégorie) et contenu normal.
@@ -160,6 +172,11 @@ export default function ProfilScreen() {
   const [enregistrement, setEnregistrement] = useState(false);
   const [messageSucces, setMessageSucces] = useState<string | null>(null);
   const [erreurEnregistrement, setErreurEnregistrement] = useState<string | null>(null);
+  /** Annulation d'une demande `EN_ATTENTE` : id annulé, confirmation, messages. */
+  const [annulationEnCours, setAnnulationEnCours] = useState<string | null>(null);
+  const [confirmationAnnulation, setConfirmationAnnulation] = useState<string | null>(null);
+  const [messageAnnulation, setMessageAnnulation] = useState<string | null>(null);
+  const [erreurAnnulation, setErreurAnnulation] = useState<string | null>(null);
 
   const chargerProfil = useCallback(async (options?: { silencieux?: boolean }) => {
     const silencieux = options?.silencieux === true;
@@ -236,6 +253,38 @@ export default function ProfilScreen() {
     setTelephoneSaisi(resultat.valeur.utilisateur.telephone ?? '');
     setMessageSucces('Votre numéro de téléphone a été enregistré par le serveur.');
   }, [telephoneSaisi]);
+
+  /**
+   * Annulation d'une demande `EN_ATTENTE` (règle métier 9) : confirmation
+   * affichée DANS l'écran (aucun `Alert`), puis `annulerDemandeCategorie` fait
+   * passer l'appartenance au statut `ANNULEE` (l'enregistrement est conservé et
+   * la catégorie redevient demandable). Enfin le profil est rechargé
+   * silencieusement pour réafficher les pastilles ; en cas d'échec, l'affichage
+   * actuel est conservé et le message d'erreur est affiché sous la section.
+   */
+  const annulerDemande = useCallback(
+    async (membreCategorieId: string) => {
+      setAnnulationEnCours(membreCategorieId);
+      setErreurAnnulation(null);
+      setMessageAnnulation(null);
+
+      const resultat = await mockMemberRepository.annulerDemandeCategorie(membreCategorieId);
+
+      setAnnulationEnCours(null);
+      setConfirmationAnnulation(null);
+
+      if (!resultat.ok) {
+        setErreurAnnulation(traduireErreur(resultat.erreur));
+        return;
+      }
+
+      setMessageAnnulation(
+        'Votre demande a été annulée : vous pouvez la redemander à tout moment depuis cet écran.',
+      );
+      await chargerProfil({ silencieux: true });
+    },
+    [chargerProfil],
+  );
 
   if (etat === 'chargement') {
     return (
@@ -443,12 +492,68 @@ export default function ProfilScreen() {
                         {phraseCategorie(appartenance?.statut, dateActivation)}
                       </Text>
                     ) : null}
+
+                    {appartenance?.statut === 'EN_ATTENTE' ? (
+                      confirmationAnnulation === appartenance.id ? (
+                        <View className="mt-3 rounded-xl border border-omda-borderGray bg-omda-white p-4">
+                          <Text className="text-sm text-omda-black">
+                            Annuler cette demande ? Vous pourrez la redemander à tout moment
+                            pour cette catégorie.
+                          </Text>
+                          <View className="mt-3 gap-3">
+                            <Button
+                              libelle="Oui, annuler la demande"
+                              icone="trash"
+                              variante="destructive"
+                              pleineLargeur
+                              chargement={annulationEnCours === appartenance.id}
+                              desactive={annulationEnCours !== null}
+                              onPress={() => void annulerDemande(appartenance.id)}
+                            />
+                            <Button
+                              libelle="Conserver la demande"
+                              variante="secondary"
+                              pleineLargeur
+                              desactive={annulationEnCours !== null}
+                              onPress={() => setConfirmationAnnulation(null)}
+                            />
+                          </View>
+                        </View>
+                      ) : (
+                        <View className="mt-3">
+                          <Button
+                            libelle="Annuler la demande"
+                            icone="trash"
+                            variante="destructive"
+                            pleineLargeur
+                            desactive={annulationEnCours !== null}
+                            onPress={() => setConfirmationAnnulation(appartenance.id)}
+                          />
+                        </View>
+                      )
+                    ) : null}
                   </View>
                 );
               })}
             </View>
           )}
         </View>
+
+        {messageAnnulation ? (
+          <View className="mt-4">
+            <InfoBanner variante="success" titre="Demande annulée" message={messageAnnulation} />
+          </View>
+        ) : null}
+
+        {erreurAnnulation ? (
+          <View className="mt-4">
+            <InfoBanner
+              variante="error"
+              titre="Annulation impossible"
+              message={erreurAnnulation}
+            />
+          </View>
+        ) : null}
 
         <View className="mt-4 border-t border-omda-borderGray pt-4">
           <Text className="text-sm text-omda-textGray">

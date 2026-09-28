@@ -22,6 +22,7 @@ import type {
 import { CODE_DEVISE_MGA, TAILLE_MAX_FICHIER_OCTETS, TYPES_MIME_AUTORISES } from '../../models';
 import type {
   EtatPaiementCandidat,
+  FichierDepose,
   FichierTeleverse,
   IdentiteCandidatEntree,
   OeuvreAdhesionEntree,
@@ -365,6 +366,57 @@ export function ajouterAppartenanceCategorie(entree: {
   };
   membreCategoriesMock.push(appartenance);
   return appartenance;
+}
+
+/**
+ * Fait évoluer le statut d'une appartenance (`membre_categorie`) :
+ * - réouverture d'une demande annulée ou refusée (`EN_ATTENTE`) ;
+ * - annulation par le membre (`ANNULEE`).
+ *
+ * ⚠️ `ACTIVE` n'est jamais appliqué par l'application : l'activation d'une
+ * demande reste la décision d'un agent OMDA (hors périmètre mobile).
+ */
+export function changerStatutAppartenanceCategorie(
+  appartenanceId: UUID,
+  statut: StatutAdhesionCategorie,
+): MembreCategorie | null {
+  const appartenance = membreCategoriesMock.find((element) => element.id === appartenanceId);
+  if (!appartenance) {
+    return null;
+  }
+  appartenance.statut = statut;
+  appartenance.date_activation = maintenantISO();
+  return appartenance;
+}
+
+/**
+ * Œuvre jointe à une demande de catégorie supplémentaire (règle métier 9) —
+ * enregistrée côté « serveur » simulé : titre, fichier de l'œuvre et son
+ * attestation de diffusion, tous deux déjà téléversés dans le bucket `oeuvres`.
+ */
+export type OeuvreDemandeCategorieMock = {
+  titre: string;
+  fichier: FichierDepose;
+  /** Une attestation de diffusion par œuvre (comme à l'adhésion). */
+  attestation: FichierDepose;
+  created_at: HorodatageISO;
+};
+
+/**
+ * Œuvres jointes aux demandes de catégorie, indexées par `membre_categorie.id`.
+ *
+ * ⚠️ Mock : aucune ligne `oeuvre` n'est créée — l'activation de la catégorie
+ * (et donc le rattachement définitif des œuvres) appartient à un agent OMDA.
+ * Persistance en mémoire, comme le reste de l'état membre.
+ */
+export const oeuvresDemandeCategorieMock = new Map<UUID, OeuvreDemandeCategorieMock[]>();
+
+/** Enregistre (ou vide, avec un tableau vide) les œuvres jointes à une demande. */
+export function definirOeuvresDemandeCategorie(
+  appartenanceId: UUID,
+  oeuvres: OeuvreDemandeCategorieMock[],
+): void {
+  oeuvresDemandeCategorieMock.set(appartenanceId, oeuvres);
 }
 
 /** Utilisateur de la session courante (`null` si personne n'est connecté). */

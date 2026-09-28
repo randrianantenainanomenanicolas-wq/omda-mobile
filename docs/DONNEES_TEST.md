@@ -2,7 +2,7 @@
 
 - Source unique : `src/services/mocks/donneesTestMock.ts` (fixtures fixes, réalistes, reproductibles).
 - Activation : `EXPO_PUBLIC_USE_MOCKS=true` (voir `.env.example`).
-- Vérification automatisée : `npx --yes tsx tools/verif-mocks.ts` → `TOUS LES CONTROLES SONT PASSES` (84 contrôles sur les 4 mocks).
+- Vérification automatisée : `npx --yes tsx tools/verif-mocks.ts` → `TOUS LES CONTROLES SONT PASSES` (97 contrôles sur les 4 mocks).
 
 Aucun montant / catégorie / opérateur n'est codé en dur dans l'UI : tout vient d'un service (mock aujourd'hui, serveur demain).
 

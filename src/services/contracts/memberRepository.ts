@@ -47,11 +47,36 @@ export interface MemberRepository {
   listerCategoriesMembre(): Promise<Result<CategoriesMembre>>;
 
   /**
-   * Demande l'ajout d'une catégorie supplémentaire (règle métier 9).
-   * L'appartenance est créée au statut `EN_ATTENTE` : seul un agent OMDA
-   * décidera de son activation ; aucune validation n'est faite localement.
+   * Demande l'ajout d'une catégorie supplémentaire SANS œuvres (règle métier 9).
+   * L'appartenance est créée — ou rouverte après une annulation ou un refus —
+   * au statut `EN_ATTENTE` : seul un agent OMDA décidera de son activation ;
+   * aucune validation n'est faite localement.
+   *
+   * ⚠️ Le parcours de l'application passe par
+   * `demanderCategorieSupplementaireAvecOeuvres` (au moins 2 œuvres, chacune
+   * avec son attestation de diffusion) : cette variante simple reste offerte
+   * pour les demandes sans œuvre.
    */
   demanderCategorieSupplementaire(categorie_id: UUID): Promise<Result<MembreCategorie>>;
+
+  /**
+   * Demande d'ajout d'une catégorie supplémentaire AVEC les œuvres qui
+   * l'accompagnent (règle métier 9 étendue) : au moins 2 œuvres, chacune
+   * accompagnée d'une attestation de diffusion.
+   *
+   * Effet : appartenance créée (ou rouverte) au statut `EN_ATTENTE` et œuvres
+   * enregistrées côté serveur — aucun paiement, aucune activation locale.
+   */
+  demanderCategorieSupplementaireAvecOeuvres(
+    entree: DemandeCategorieOeuvresEntree,
+  ): Promise<Result<MembreCategorie>>;
+
+  /**
+   * Annule une demande de catégorie encore `EN_ATTENTE` : l'appartenance passe
+   * au statut `ANNULEE` (jamais supprimée) et les œuvres jointes sont oubliées.
+   * Refusée dès que la demande a été traitée par l'OMDA (`DEMANDE_NON_ANNUABLE`).
+   */
+  annulerDemandeCategorie(membre_categorie_id: UUID): Promise<Result<MembreCategorie>>;
 
   /** Met à jour les informations modifiables par le membre. */
   mettreAJourProfil(entree: MiseAJourProfilEntree): Promise<Result<ProfilMembre>>;
@@ -138,6 +163,27 @@ export type ProfilMembre = {
 export type CategoriesMembre = {
   categories: Categorie[];
   membre_categories: MembreCategorie[];
+};
+
+/**
+ * Œuvre jointe à une demande de catégorie supplémentaire (règle métier 9) :
+ * un titre, le fichier de l'œuvre déjà téléversé (bucket `oeuvres`) et son
+ * attestation de diffusion — une par œuvre, comme pour l'adhésion (règle
+ * métier 8).
+ */
+export type OeuvreDemandeCategorieEntree = {
+  titre: string;
+  fichier: FichierDepose;
+  attestation: FichierDepose;
+};
+
+/**
+ * Payload de `demanderCategorieSupplementaireAvecOeuvres` : la catégorie visée
+ * et AU MOINS 2 œuvres complètes (titre + fichier + attestation de diffusion).
+ */
+export type DemandeCategorieOeuvresEntree = {
+  categorie_id: UUID;
+  oeuvres: OeuvreDemandeCategorieEntree[];
 };
 
 /**
@@ -230,6 +276,11 @@ export const CODES_ERREUR_MEMBRE = {
   CATEGORIE_INDISPONIBLE: 'CATEGORIE_INDISPONIBLE',
   CATEGORIE_DEJA_ENREGISTREE: 'CATEGORIE_DEJA_ENREGISTREE',
   CATEGORIE_DEJA_DEMANDEE: 'CATEGORIE_DEJA_DEMANDEE',
+  DEMANDE_CATEGORIE_INTROUVABLE: 'DEMANDE_CATEGORIE_INTROUVABLE',
+  DEMANDE_NON_ANNUABLE: 'DEMANDE_NON_ANNUABLE',
+  OEUVRE_MINIMUM_REQUIS: 'OEUVRE_MINIMUM_REQUIS',
+  OEUVRE_INCOMPLETE: 'OEUVRE_INCOMPLETE',
+  ATTESTATION_MANQUANTE: 'ATTESTATION_MANQUANTE',
 } as const;
 
 export type CodeErreurMembre = (typeof CODES_ERREUR_MEMBRE)[keyof typeof CODES_ERREUR_MEMBRE];
