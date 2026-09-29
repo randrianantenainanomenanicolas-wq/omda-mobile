@@ -1,5 +1,5 @@
 import { router, useLocalSearchParams } from 'expo-router';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Text, View } from 'react-native';
 
 import {
@@ -15,11 +15,9 @@ import {
   ScreenContainer,
   StatusPill,
   type StatutPill,
-  type VarianteBanner,
 } from '../../src/components/ui';
 import {
   STATUTS_OEUVRE_MODIFIABLES,
-  type AttestationDiffusion,
   type Categorie,
   type Oeuvre,
   type StatutOeuvre,
@@ -27,12 +25,7 @@ import {
 import { CODES_ERREUR_MEMBRE } from '../../src/services/contracts';
 import type { ErreurApp, EstimationMontant } from '../../src/services/contracts';
 import { mockMemberRepository, mockPublicContentService } from '../../src/services/mocks';
-import {
-  estFichierAudio,
-  formaterTailleFichier,
-  messageErreurOuverture,
-  openWithSystemPicker,
-} from '../../src/utils';
+import { estFichierAudio } from '../../src/utils';
 
 /**
  * Écran S — Fiche d'une œuvre (hors onglets).
@@ -53,14 +46,13 @@ import {
  *   paiement confirmé `REUSSI` ;
  * - le montant des frais de dépôt vient du service (`estimerMontant`), jamais de
  *   l'écran ; 4 états obligatoires : chargement / erreur / vide / contenu ;
- * - les documents enregistrés (œuvre déposée et attestations de diffusion) sont
- *   consultables : écoute intégrée pour une œuvre audio (`AudioPreview`) et
- *   ouverture via le sélecteur système « Ouvrir avec… »
- *   (`openWithSystemPicker`) pour tous les documents — l'interface ne propose
- *   AUCUNE action de partage ; un échec d'ouverture affiche la cause exacte
- *   (fichier introuvable / téléchargement / aucune application / repli
- *   générique) avec un bouton « Réessayer » ;
- * - le lien d'un document est TEMPORAIRE et vient TOUJOURS du service
+ * - seule l'écoute intégrée reste proposée (`AudioPreview`) : « Écouter l'œuvre »
+ *   demande un lien temporaire au service puis joue la piste dans l'application ;
+ *   la fiche n'ouvre AUCUN document avec une autre application et ne propose
+ *   AUCUNE action de partage — un fichier qui n'est pas audio affiche « Aperçu
+ *   audio indisponible pour ce format. » et un échec d'écoute affiche sa cause
+ *   exacte avec un bouton « Réessayer » ;
+ * - le lien d'écoute est TEMPORAIRE et vient TOUJOURS du service
  *   (`obtenirUrlFichier`) : l'écran ne construit jamais de lien depuis un chemin
  *   de stockage (bucket privé), et ne le prépare qu'à la demande de l'utilisateur.
  */
@@ -76,6 +68,9 @@ const STATUTS_AFFICHES: Record<StatutOeuvre, { variante: StatutPill; libelle: st
   REJETEE: { variante: 'error', libelle: 'Rejetée' },
   DEPOT_FINALISE: { variante: 'success', libelle: 'Dépôt finalisé' },
 };
+
+/** Aucun aperçu audio possible : le fichier n'est pas audio ou son lien est inaccessible. */
+const MESSAGE_APERCU_INDISPONIBLE = 'Aperçu audio indisponible pour ce format.';
 
 /** Statuts pour lesquels l'œuvre est encore en cours d'examen par l'OMDA. */
 const STATUTS_EN_EXAMEN: StatutOeuvre[] = ['ENVOYEE', 'EN_COURS_DE_VALIDATION'];
@@ -115,23 +110,6 @@ function nomFichier(chemin: string | null): string {
   return parties[parties.length - 1] ?? '';
 }
 
-/** Document consultable depuis la fiche (œuvre déposée ou attestation de diffusion). */
-type DocumentFiche = {
-  /** Clé stable de l'élément dans la liste (sert aussi de clé d'action en cours). */
-  identifiant: string;
-  libelle: string;
-  chemin_stockage: string;
-  mime_type: string;
-  taille_octets: number | null;
-};
-
-/** Icône du document selon son type MIME. */
-function iconeDocument(mimeType: string): NomIcone {
-  if (estFichierAudio(mimeType)) return 'file-audio';
-  if (mimeType === 'application/pdf') return 'file-pdf';
-  return 'file-image';
-}
-
 export default function FicheOeuvreScreen() {
   const parametres = useLocalSearchParams<{ oeuvre_id?: string }>();
   const oeuvreId = parametreTexte(parametres.oeuvre_id);
@@ -143,22 +121,10 @@ export default function FicheOeuvreScreen() {
   const [categorie, setCategorie] = useState<Categorie | null>(null);
   const [fraisDepot, setFraisDepot] = useState<EstimationMontant | null>(null);
   const [erreurFrais, setErreurFrais] = useState<string | null>(null);
-  const [attestations, setAttestations] = useState<AttestationDiffusion[]>([]);
-  const [erreurAttestations, setErreurAttestations] = useState<string | null>(null);
   /** Lien temporaire de l'œuvre audio : demandé au service au premier « Écouter ». */
   const [urlAudio, setUrlAudio] = useState<string | null>(null);
   const [chargementAudio, setChargementAudio] = useState(false);
   const [erreurAudio, setErreurAudio] = useState<string | null>(null);
-  /** Action en cours sur un document (clé `identifiant:action`) : bloque les doubles appuis. */
-  const [actionEnCours, setActionEnCours] = useState<string | null>(null);
-  const [messageAction, setMessageAction] = useState<{
-    variante: VarianteBanner;
-    /** Absent sur un échec : le message porte alors la cause exacte à afficher. */
-    titre?: string;
-    texte: string;
-    /** Document concerné : permet de proposer « Réessayer » après un échec. */
-    document?: DocumentFiche;
-  } | null>(null);
 
   /**
    * Charge la fiche : l'œuvre (statut faisant foi), le référentiel des catégories
@@ -178,15 +144,12 @@ export default function FicheOeuvreScreen() {
     setMessageErreur('');
     setErreurFrais(null);
     setFraisDepot(null);
-    setErreurAttestations(null);
-    setAttestations([]);
     /**
-     * Les liens de consultation sont TEMPORAIRES : ils ne survivent pas à un
-     * rechargement de la fiche (l'œuvre ou son attestation a pu être remplacée).
+     * Le lien d'écoute est TEMPORAIRE : il ne survit pas à un rechargement de la
+     * fiche (l'œuvre a pu être remplacée).
      */
     setUrlAudio(null);
     setErreurAudio(null);
-    setMessageAction(null);
 
     try {
       const reponse = await mockMemberRepository.obtenirOeuvre(oeuvreId);
@@ -209,7 +172,7 @@ export default function FicheOeuvreScreen() {
 
       const oeuvreChargee = reponse.valeur;
 
-      const [reponseCategories, reponseFrais, reponseAttestations] = await Promise.all([
+      const [reponseCategories, reponseFrais] = await Promise.all([
         mockPublicContentService.listerCategories(),
         oeuvreChargee.statut === 'VALIDEE'
           ? mockPublicContentService.estimerMontant({
@@ -217,7 +180,6 @@ export default function FicheOeuvreScreen() {
               categorie_id: oeuvreChargee.categorie_id,
             })
           : Promise.resolve(null),
-        mockMemberRepository.listerAttestationsOeuvre(oeuvreChargee.id),
       ]);
 
       setOeuvre(oeuvreChargee);
@@ -235,14 +197,6 @@ export default function FicheOeuvreScreen() {
         } else {
           setErreurFrais(traduireErreur(reponseFrais.erreur));
         }
-      }
-
-      /** Attestations de diffusion : au moins une par œuvre (règle métier 8). */
-      if (reponseAttestations.ok) {
-        setAttestations(reponseAttestations.valeur);
-      } else {
-        setAttestations([]);
-        setErreurAttestations(traduireErreur(reponseAttestations.erreur));
       }
 
       setEtat('contenu');
@@ -313,7 +267,17 @@ export default function FicheOeuvreScreen() {
       const reponse = await mockMemberRepository.obtenirUrlFichier(cheminStockage);
       if (!reponse.ok) {
         setUrlAudio(null);
-        setErreurAudio(traduireErreur(reponse.erreur));
+        /**
+         * Aucune URI accessible : repli « Aperçu audio indisponible pour ce
+         * format. » ; une panne réseau ou inattendue garde, elle, son message
+         * explicite.
+         */
+        setErreurAudio(
+          reponse.erreur.type === 'metier' &&
+            reponse.erreur.code === CODES_ERREUR_MEMBRE.FICHIER_INTROUVABLE
+            ? MESSAGE_APERCU_INDISPONIBLE
+            : traduireErreur(reponse.erreur),
+        );
         return;
       }
 
@@ -332,7 +296,7 @@ export default function FicheOeuvreScreen() {
 
       if (urlResolue.length === 0) {
         setUrlAudio(null);
-        setErreurAudio('Aperçu indisponible pour le moment.');
+        setErreurAudio(MESSAGE_APERCU_INDISPONIBLE);
         return;
       }
       setUrlAudio(urlResolue);
@@ -346,88 +310,6 @@ export default function FicheOeuvreScreen() {
     }
   }, [oeuvre]);
 
-  /**
-   * Ouvre un document stocké : le lien temporaire est demandé au service, puis
-   * le sélecteur système « Ouvrir avec… » (`openWithSystemPicker`) laisse
-   * l'utilisateur choisir l'application — téléchargement préalable dans le
-   * cache quand le lien est distant.
-   */
-  const ouvrirDocument = useCallback(async (document: DocumentFiche) => {
-    setActionEnCours(document.identifiant);
-    setMessageAction(null);
-    try {
-      const reponse = await mockMemberRepository.obtenirUrlFichier(document.chemin_stockage);
-      if (!reponse.ok) {
-        setMessageAction({
-          variante: 'error',
-          texte: messageErreurOuverture(
-            reponse.erreur.type === 'metier' ? reponse.erreur.code : undefined,
-          ),
-          document,
-        });
-        return;
-      }
-
-      const uriResolue = reponse.valeur.url.trim();
-      /**
-       * TODO — diagnostic temporaire (bugfix aperçu) : confirmer que le service
-       * renvoie bien une URI réelle (`file://`, `content://` ou `https://`) et
-       * JAMAIS un chemin de bucket brut. À retirer après validation sur appareil.
-       */
-      console.log(
-        '[OMDA — diagnostic] URI document résolue :',
-        uriResolue || '(vide)',
-        '| fichier :',
-        nomFichier(document.chemin_stockage),
-      );
-
-      if (uriResolue.length === 0) {
-        setMessageAction({
-          variante: 'error',
-          texte: messageErreurOuverture(CODES_ERREUR_MEMBRE.FICHIER_INTROUVABLE),
-          document,
-        });
-        return;
-      }
-
-      const ouverture = await openWithSystemPicker({
-        uri: uriResolue,
-        fileName: nomFichier(document.chemin_stockage),
-      });
-
-      /**
-       * `info` et non `success` : le sélecteur « Ouvrir avec… » est une action
-       * confiée au téléphone, ce n'est pas une information confirmée par le
-       * serveur OMDA. Sur un échec, aucun titre : le message porte la cause
-       * exacte (fichier introuvable, téléchargement échoué, aucune application
-       * disponible, application choisie en échec ou repli générique).
-       */
-      setMessageAction(
-        ouverture.ok
-          ? {
-              variante: 'info',
-              titre: 'Document ouvert',
-              texte: 'Le document a été ouvert avec l’application choisie sur votre téléphone.',
-            }
-          : {
-              variante: 'error',
-              texte: messageErreurOuverture(
-                ouverture.erreur.type === 'metier' ? ouverture.erreur.code : undefined,
-              ),
-              document,
-            },
-      );
-    } catch {
-      setMessageAction({
-        variante: 'error',
-        texte: messageErreurOuverture(undefined),
-        document,
-      });
-    } finally {
-      setActionEnCours(null);
-    }
-  }, []);
-
   /* ----------------------- Valeurs dérivées — hooks TOUJOURS inconditionnels */
 
   /**
@@ -435,47 +317,10 @@ export default function FicheOeuvreScreen() {
    * des états `chargement` / `erreur` / `vide` : React exige le même nombre de
    * hooks, dans le même ordre, à chaque rendu — sinon il lève « Rendered more
    * hooks than during the previous render » dès le passage chargement → contenu.
-   * Le `useMemo` ci-dessous tolère donc `oeuvre === null` au lieu d'être placé
+   * Le calcul ci-dessous tolère donc `oeuvre === null` au lieu d'être placé
    * après les retours.
    */
   const estAudio = Boolean(oeuvre?.chemin_fichier) && estFichierAudio(oeuvre?.mime_type);
-
-  /** Documents consultables depuis la fiche : l'œuvre déposée, puis ses attestations. */
-  const documents = useMemo<DocumentFiche[]>(() => {
-    if (!oeuvre) {
-      return [];
-    }
-
-    const liste: DocumentFiche[] = [];
-
-    if (oeuvre.chemin_fichier && oeuvre.mime_type) {
-      liste.push({
-        identifiant: `oeuvre:${oeuvre.id}`,
-        libelle: 'Œuvre déposée',
-        chemin_stockage: oeuvre.chemin_fichier,
-        mime_type: oeuvre.mime_type,
-        taille_octets: oeuvre.taille_octets,
-      });
-    }
-
-    attestations.forEach((attestation, index) => {
-      liste.push({
-        identifiant: `attestation:${attestation.id}`,
-        libelle:
-          attestations.length > 1
-            ? `Attestation de diffusion ${index + 1}`
-            : 'Attestation de diffusion',
-        chemin_stockage: attestation.chemin_stockage,
-        mime_type: attestation.mime_type,
-        taille_octets: attestation.taille_octets,
-      });
-    });
-
-    return liste;
-  }, [attestations, oeuvre]);
-
-  /** Document dont l'ouverture a échoué : alimente le bouton « Réessayer » du compte rendu. */
-  const documentEchoue = messageAction?.document ?? null;
 
   /* ------------------------------------------------------ États de l'écran */
 
@@ -562,36 +407,31 @@ export default function FicheOeuvreScreen() {
         </View>
       </View>
 
-      {documents.length > 0 || erreurAttestations ? (
+      {estAudio ? (
         <View className="mt-5 w-full rounded-2xl border border-omda-borderGray bg-omda-white p-5">
-          <Text className="text-lg font-bold text-omda-black">Mes documents</Text>
+          <Text className="text-lg font-bold text-omda-black">Écouter l’œuvre</Text>
           <Text className="mt-1 text-sm text-omda-textGray">
-            Écoutez une œuvre audio dans l’application, ou ouvrez un document avec l’application
-            adaptée de votre téléphone.
+            Écoutez votre œuvre audio directement dans l’application.
           </Text>
 
-          {estAudio ? (
-            <>
-              {urlAudio ? (
-                <AudioPreview
-                  libelle={oeuvre.titre}
-                  url={urlAudio}
-                  onReessayer={() => void ecouterOeuvre()}
-                />
-              ) : (
-                <View className="mt-3">
-                  <Button
-                    libelle="Écouter l’œuvre"
-                    variante="secondary"
-                    icone="headphones"
-                    pleineLargeur
-                    chargement={chargementAudio}
-                    onPress={() => void ecouterOeuvre()}
-                  />
-                </View>
-              )}
-            </>
-          ) : null}
+          {urlAudio ? (
+            <AudioPreview
+              libelle={oeuvre.titre}
+              url={urlAudio}
+              onReessayer={() => void ecouterOeuvre()}
+            />
+          ) : (
+            <View className="mt-3">
+              <Button
+                libelle="Écouter l’œuvre"
+                variante="secondary"
+                icone="headphones"
+                pleineLargeur
+                chargement={chargementAudio}
+                onPress={() => void ecouterOeuvre()}
+              />
+            </View>
+          )}
 
           {erreurAudio ? (
             <View className="mt-3">
@@ -604,71 +444,13 @@ export default function FicheOeuvreScreen() {
               />
             </View>
           ) : null}
-
-          {documents.map((document) => (
-            <View
-              key={document.identifiant}
-              className="mt-4 rounded-xl border border-omda-borderGray bg-omda-warmGray p-4"
-            >
-              <View className="flex-row items-start">
-                <Icone
-                  nom={iconeDocument(document.mime_type)}
-                  taille={16}
-                  classeCouleur="text-omda-textGray"
-                />
-                <View className="ml-2 flex-1">
-                  <Text className="text-base font-semibold text-omda-black">{document.libelle}</Text>
-                  <Text className="mt-1 text-sm text-omda-textGray">
-                    {nomFichier(document.chemin_stockage)}
-                    {document.taille_octets
-                      ? ` — ${formaterTailleFichier(document.taille_octets)}`
-                      : ''}
-                  </Text>
-                </View>
-              </View>
-
-              <View className="mt-3">
-                <Button
-                  libelle="Ouvrir le fichier"
-                  variante="secondary"
-                  icone="up-right-from-square"
-                  pleineLargeur
-                  chargement={actionEnCours === document.identifiant}
-                  onPress={() => void ouvrirDocument(document)}
-                />
-              </View>
-            </View>
-          ))}
-
-          {erreurAttestations ? (
-            <View className="mt-4">
-              <InfoBanner
-                variante="error"
-                titre="Attestations indisponibles"
-                message={erreurAttestations}
-                actionLibelle="Actualiser"
-                onAction={() => void chargerFiche()}
-              />
-            </View>
-          ) : null}
-
-          {messageAction ? (
-            <View className="mt-4">
-              <InfoBanner
-                variante={messageAction.variante}
-                titre={messageAction.titre}
-                message={messageAction.texte}
-                actionLibelle={messageAction.variante === 'error' ? 'Réessayer' : undefined}
-                onAction={
-                  messageAction.variante === 'error' && documentEchoue
-                    ? () => void ouvrirDocument(documentEchoue)
-                    : undefined
-                }
-              />
-            </View>
-          ) : null}
         </View>
-      ) : null}
+      ) : (
+        <View className="mt-5 w-full rounded-2xl border border-omda-borderGray bg-omda-white p-5">
+          <Text className="text-lg font-bold text-omda-black">Écoute de l’œuvre</Text>
+          <Text className="mt-2 text-sm text-omda-textGray">{MESSAGE_APERCU_INDISPONIBLE}</Text>
+        </View>
+      )}
 
       {oeuvre.statut === 'BROUILLON' ? (
         <View className="mt-5 gap-3">

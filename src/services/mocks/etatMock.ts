@@ -715,8 +715,9 @@ export async function simulerTeleversement(
   }
 
   /**
-   * Le mock retient l'URI locale du fichier choisi : c'est elle qui permettra de
-   * l'écouter, de l'ouvrir ou de le partager depuis « Fiche de l'œuvre ».
+   * Le mock retient l'URI locale du fichier choisi : c'est elle que le service
+   * renverra pour ÉCOUTER l'œuvre dans l'application (la fiche n'ouvre ni ne
+   * partage aucun document).
    */
   urisLocalesFichiers.set(entree.chemin_stockage, entree.fichier_uri);
 
@@ -734,9 +735,9 @@ export async function simulerTeleversement(
  * URI `file://` / `content://` du téléphone).
  *
  * Le mock n'a pas de vrai Storage : il retient le fichier réellement choisi par
- * l'utilisateur afin que l'écoute audio et le partage fonctionnent en
- * démonstration. Au branchement réel (Supabase Storage), `obtenirUrlFichier`
- * renverra une URL signée et ce registre n'aura plus d'utilité.
+ * l'utilisateur afin que l'écoute audio fonctionne en démonstration. Au
+ * branchement réel (Supabase Storage), `obtenirUrlFichier` renverra une URL
+ * signée et ce registre n'aura plus d'utilité.
  */
 export const urisLocalesFichiers = new Map<string, string>();
 

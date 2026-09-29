@@ -4,9 +4,9 @@ import { TYPES_MIME_AUTORISES } from '../models';
  * Aides d'affichage des documents DÉJÀ STOCKÉS (œuvre, attestation de diffusion) :
  * nature audio du fichier, taille lisible, chronomètre d'écoute.
  *
- * ⚠️ Aucun lien n'est fabriqué ici et aucun fichier n'est ouvert depuis ce
- * module : l'ouverture d'un document est centralisée dans `filePreview.ts`
- * (`openFile`) et le lien temporaire vient TOUJOURS du service
+ * ⚠️ Aucun lien n'est fabriqué ici et aucun fichier n'est OUVERT depuis ce
+ * module : un document déposé s'écoute DANS l'application (`AudioPreview`) et le
+ * lien temporaire vient TOUJOURS du service
  * (`MemberRepository.obtenirUrlFichier`).
  */
 
