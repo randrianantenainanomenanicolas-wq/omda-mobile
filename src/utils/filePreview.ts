@@ -33,11 +33,13 @@ import { CODES_ERREUR_MEMBRE, erreurMetier, ok, type Result, type ResultErr } fr
  *
  * Chaque échec est renvoyé sous forme de refus métier EXPLOITABLE par l'écran
  * (`messageErreurOuverture` donne alors le libellé exact à afficher) :
- * - `FICHIER_INTROUVABLE` / `FILE_NOT_FOUND` → « Fichier introuvable. » ;
- * - `AUCUNE_APPLICATION` / `SHARING_UNAVAILABLE` → aucune application disponible ;
- * - `DOWNLOAD_FAILED` → téléchargement du document distant échoué ;
- * - `OPEN_WITH_FAILED` → l'application choisie n'a pas pu ouvrir le document ;
- * - `PREVIEW_INDISPONIBLE` → repli générique « Ouverture impossible. Réessayez. ».
+ * - `FILE_NOT_FOUND` / `FICHIER_INTROUVABLE` → « Fichier introuvable. » ;
+ * - `AUCUNE_APPLICATION` → « Aucune application n’est disponible pour ouvrir
+ *   ce fichier. » ;
+ * - `PREVIEW_INDISPONIBLE` → « Aperçu indisponible : le fichier n’est pas
+ *   accessible pour le moment. » (chemin brut, distant non téléchargeable) ;
+ * - tout autre code (`SHARING_UNAVAILABLE`, `OPEN_WITH_FAILED`, …) → repli
+ *   générique « Ouverture impossible. Réessayez. ».
  */
 
 /** Code d'erreur métier générique : format ou circonstance non pris en charge. */
@@ -64,30 +66,28 @@ const MESSAGE_FICHIER_INTROUVABLE = 'Fichier introuvable.';
 /** Message quand aucune application associée n'est disponible sur l'appareil. */
 const MESSAGE_AUCUNE_APPLICATION = 'Aucune application n’est disponible pour ouvrir ce fichier.';
 
-/** Message quand le téléchargement du document distant a échoué. */
-const MESSAGE_TELECHARGEMENT =
-  'Le téléchargement du fichier a échoué. Vérifiez votre connexion Internet puis réessayez.';
-
-/** Message quand l'application choisie n'a pas pu recevoir le document. */
-const MESSAGE_OUVERTURE_AVEC =
-  'Le document n’a pas pu être ouvert avec l’application choisie. Réessayez.';
+/** Message quand le fichier n'est pas accessible (chemin brut, distant non téléchargeable). */
+const MESSAGE_PREVIEW_INDISPONIBLE =
+  'Aperçu indisponible : le fichier n’est pas accessible pour le moment.';
 
 /** Message générique de repli lorsque la cause précise est inconnue. */
 const MESSAGE_OUVERTURE_IMPOSSIBLE = 'Ouverture impossible. Réessayez.';
 
 /**
- * Message affichable pour un refus d'ouverture : la cause connue (code métier)
- * est TOUJOURS prioritaire sur le message générique.
+ * Message affichable pour un refus d'ouverture — mapping exact attendu par
+ * l'écran : la cause connue (code métier) est TOUJOURS prioritaire sur le
+ * message générique.
  */
 export function messageErreurOuverture(code: string | undefined): string {
   if (code === CODES_ERREUR_MEMBRE.FICHIER_INTROUVABLE || code === CODE_ERREUR_FICHIER_ABSENT) {
     return MESSAGE_FICHIER_INTROUVABLE;
   }
-  if (code === CODE_ERREUR_AUCUNE_APPLICATION || code === CODE_ERREUR_SELECTEUR) {
+  if (code === CODE_ERREUR_AUCUNE_APPLICATION) {
     return MESSAGE_AUCUNE_APPLICATION;
   }
-  if (code === CODE_ERREUR_TELECHARGEMENT) return MESSAGE_TELECHARGEMENT;
-  if (code === CODE_ERREUR_OUVERTURE_AVEC) return MESSAGE_OUVERTURE_AVEC;
+  if (code === CODE_ERREUR_PREVIEW) {
+    return MESSAGE_PREVIEW_INDISPONIBLE;
+  }
   return MESSAGE_OUVERTURE_IMPOSSIBLE;
 }
 
@@ -266,13 +266,27 @@ export type OptionsOuvertureAvec = {
   mimeType?: string;
 };
 
+/** Extensions déduites des types MIME supportés (repli d'un nom sans extension). */
+const EXTENSION_PAR_MIME: Record<string, string> = {
+  'application/pdf': 'pdf',
+  'image/png': 'png',
+  'image/jpeg': 'jpg',
+  'audio/mpeg': 'mp3',
+  'audio/wav': 'wav',
+};
+
 /**
- * Nom local sûr pour le fichier téléchargé dans le cache : nom fourni quand il
- * existe, sinon « document » + extension déduite de l'URI ; caractères interdits
- * remplacés pour rester compatible avec tous les systèmes de fichiers.
+ * Nom local sûr AVEC extension pour le dossier « omda-preview/ » : extension du
+ * `fileName` fourni si présent, sinon déduite de l'URL, sinon du type MIME
+ * (pdf / png / jpg / mp3…) ; caractères interdits remplacés pour rester
+ * compatible avec tous les systèmes de fichiers.
  */
-function nomLocalFichier(fileName: string | undefined, uri: string): string {
-  const extension = extensionFichier(fileName?.trim() || uri);
+function nomLocalFichier(fileName: string | undefined, uri: string, mimeType?: string): string {
+  const extension =
+    extensionFichier(fileName?.trim() || '') ||
+    extensionFichier(uri) ||
+    EXTENSION_PAR_MIME[(mimeType ?? '').trim().toLowerCase()] ||
+    '';
   const suffixe = extension ? `.${extension}` : '';
   const base = fileName?.trim() || 'document';
   const sansExtension =
@@ -288,18 +302,25 @@ function nomLocalFichier(fileName: string | undefined, uri: string): string {
 }
 
 /**
- * Ouvre un document avec le SÉLECTEUR SYSTÈME « Ouvrir avec… » : l'utilisateur
- * choisit lui-même l'application qui recevra le fichier (aucun bouton
- * « Partager » dans l'interface — `expo-sharing` ne sert ici que de déclencheur
- * technique au service de l'OS).
+ * Ouvre un document avec le SÉLECTEUR SYSTÈME « Ouvrir avec… » — résolution en
+ * fichier LOCAL obligatoire avant tout appel système (aucun chemin brut n'est
+ * ouvert) :
  *
+ * - logs DEBUG (`console.log`) : uri, fileName, mimeType, plateforme puis
+ *   existence / taille du fichier — pour diagnostiquer sur appareil ;
  * - URI vide → refus métier `FILE_NOT_FOUND` ;
- * - `file://` → vérification d'existence (`getInfoAsync`) puis sélecteur ;
- * - `http(s)://` → téléchargement dans le cache (`downloadAsync`, nom local
- *   déduit de `fileName` ou de l'extension de l'URI) puis sélecteur ;
- * - toute autre URI locale (ex. `content://`) → sélecteur direct ;
- * - échecs → `DOWNLOAD_FAILED` / `FILE_NOT_FOUND` / `SHARING_UNAVAILABLE` /
- *   `OPEN_WITH_FAILED`, affichables via `messageErreurOuverture` ;
+ * - chemin de stockage brut (ni `file://`, ni `http(s)://`) → refus métier
+ *   `PREVIEW_INDISPONIBLE` (message clair, aucun essai sur un path brut) ;
+ * - web → ouverture de l'URL dans un nouvel onglet (`window.open`) ;
+ * - `http(s)://` → dossier `omda-preview/` créé dans le cache
+ *   (`makeDirectoryAsync` + `intermediates`), téléchargement (`downloadAsync`),
+ *   contrôle du code HTTP puis de l'existence et de la taille (> 0) localement ;
+ * - `file://` → contrôle d'existence et de taille (> 0) ;
+ * - Android → `file://` converti en `content://` (`getContentUriAsync`) puis
+ *   intention VIEW avec `GRANT_READ_URI_PERMISSION` et type MIME ; absence
+ *   d'application → `AUCUNE_APPLICATION` ;
+ * - iOS → `Sharing.isAvailableAsync()` faux → `SHARING_UNAVAILABLE`, sinon
+ *   feuille « Ouvrir avec… » (annulation par l'utilisateur = succès) ;
  * - aucune exception ne remonte à l'écran (contrat `Result`).
  */
 export async function openWithSystemPicker({
@@ -308,36 +329,86 @@ export async function openWithSystemPicker({
   mimeType,
 }: OptionsOuvertureAvec): Promise<Result<void>> {
   const lien = uri.trim();
+  const typeMime = mimeType?.trim() || mimeTypeDepuisNom(fileName?.trim() || lien);
+
+  console.log(
+    '[OMDA debug] openWithSystemPicker — uri:',
+    lien || '(vide)',
+    '| fileName:',
+    fileName?.trim() || '(absent)',
+    '| mimeType:',
+    typeMime,
+    '| platform:',
+    Platform.OS,
+  );
+
+  /** A) URI vide → refus métier. */
   if (lien.length === 0) {
     return erreurMetier(CODE_ERREUR_FICHIER_ABSENT, MESSAGE_FICHIER_INTROUVABLE);
   }
 
-  const typeMime = mimeType?.trim() || mimeTypeDepuisNom(fileName?.trim() || lien);
-  let uriLocale = lien;
-
-  /** Le sélecteur système n'accepte qu'un fichier LOCAL : un distant est téléchargé d'abord. */
-  if (/^https?:\/\//i.test(lien)) {
-    const repertoireCache = FileSystem.cacheDirectory;
-    if (!repertoireCache) {
-      return erreurMetier(CODE_ERREUR_TELECHARGEMENT, MESSAGE_TELECHARGEMENT);
-    }
-    const cible = `${repertoireCache}${nomLocalFichier(fileName, lien)}`;
-    try {
-      await FileSystem.deleteAsync(cible, { idempotent: true });
-      const telechargement = await FileSystem.downloadAsync(lien, cible);
-      if (telechargement.status < 200 || telechargement.status >= 300) {
-        return erreurMetier(CODE_ERREUR_TELECHARGEMENT, MESSAGE_TELECHARGEMENT);
-      }
-    } catch {
-      return erreurMetier(CODE_ERREUR_TELECHARGEMENT, MESSAGE_TELECHARGEMENT);
-    }
-    uriLocale = cible;
+  /** B) chemin de stockage brut : JAMAIS ouvert tel quel. */
+  const estLocal = lien.startsWith('file://');
+  const estDistant = /^https?:\/\//i.test(lien);
+  if (!estLocal && !estDistant) {
+    console.log('[OMDA debug] chemin brut refusé (attendu file:// ou http(s)://) :', lien);
+    return erreurMetier(CODE_ERREUR_PREVIEW, MESSAGE_PREVIEW_INDISPONIBLE);
   }
 
-  if (uriLocale.startsWith('file://')) {
+  /** Plateforme web : l'URL est ouverte directement dans un nouvel onglet. */
+  if (Platform.OS === 'web') {
+    console.log('[OMDA debug] ouverture web (nouvel onglet) :', lien);
+    window.open(lien, '_blank');
+    return ok(undefined);
+  }
+
+  let uriLocale = lien;
+
+  /** C) Lien distant → téléchargement dans <cache>/omda-preview/ (nom AVEC extension). */
+  if (estDistant) {
+    const repertoireCache = FileSystem.cacheDirectory;
+    if (!repertoireCache) {
+      return erreurMetier(CODE_ERREUR_PREVIEW, MESSAGE_PREVIEW_INDISPONIBLE);
+    }
+    const dossierPreview = `${repertoireCache}omda-preview/`;
+    const cible = `${dossierPreview}${nomLocalFichier(fileName, lien, typeMime)}`;
+    try {
+      await FileSystem.makeDirectoryAsync(dossierPreview, { intermediates: true });
+      await FileSystem.deleteAsync(cible, { idempotent: true });
+      const telechargement = await FileSystem.downloadAsync(lien, cible);
+      const information = await FileSystem.getInfoAsync(cible);
+      const taille = information.exists && 'size' in information ? information.size : 0;
+      console.log(
+        '[OMDA debug] téléchargement — status HTTP:',
+        telechargement.status,
+        '| exists:',
+        information.exists,
+        '| size:',
+        taille,
+        '| cible:',
+        cible,
+      );
+      if (
+        telechargement.status < 200 ||
+        telechargement.status >= 300 ||
+        !information.exists ||
+        information.isDirectory ||
+        taille <= 0
+      ) {
+        return erreurMetier(CODE_ERREUR_PREVIEW, MESSAGE_PREVIEW_INDISPONIBLE);
+      }
+    } catch {
+      console.log('[OMDA debug] téléchargement en échec :', lien);
+      return erreurMetier(CODE_ERREUR_PREVIEW, MESSAGE_PREVIEW_INDISPONIBLE);
+    }
+    uriLocale = cible;
+  } else {
+    /** D) Fichier local : existence + taille > 0. */
     try {
       const information = await FileSystem.getInfoAsync(uriLocale);
-      if (!information.exists || information.isDirectory) {
+      const taille = information.exists && 'size' in information ? information.size : 0;
+      console.log('[OMDA debug] fichier local — exists:', information.exists, '| size:', taille);
+      if (!information.exists || information.isDirectory || taille <= 0) {
         return erreurMetier(CODE_ERREUR_FICHIER_ABSENT, MESSAGE_FICHIER_INTROUVABLE);
       }
     } catch {
@@ -345,9 +416,34 @@ export async function openWithSystemPicker({
     }
   }
 
+  /** Android : file:// → content:// puis intention VIEW. */
+  if (Platform.OS === 'android') {
+    try {
+      const uriContenu = await FileSystem.getContentUriAsync(uriLocale);
+      await IntentLauncher.startActivityAsync(ACTION_ANDROID_VIEW, {
+        data: uriContenu,
+        flags: DRAPEAU_LECTURE_URI,
+        type: typeMime || '*/*',
+      });
+      console.log('[OMDA debug] intention VIEW lancée — content://', uriContenu);
+      return ok(undefined);
+    } catch (erreur) {
+      const details = (erreur instanceof Error ? erreur.message : String(erreur ?? '')).toLowerCase();
+      console.log('[OMDA debug] intention VIEW en échec :', details);
+      if (INDICES_FICHIER_INTROUVABLE.some((indice) => details.includes(indice))) {
+        return erreurMetier(CODE_ERREUR_FICHIER_ABSENT, MESSAGE_FICHIER_INTROUVABLE);
+      }
+      if (INDICES_AUCUNE_APPLICATION.some((indice) => details.includes(indice))) {
+        return erreurMetier(CODE_ERREUR_AUCUNE_APPLICATION, MESSAGE_AUCUNE_APPLICATION);
+      }
+      return erreurMetier(CODE_ERREUR_OUVERTURE_AVEC, MESSAGE_OUVERTURE_IMPOSSIBLE);
+    }
+  }
+
+  /** iOS : feuille « Ouvrir avec… » (annulation utilisateur = succès, jamais d'erreur). */
   try {
     if (!(await Sharing.isAvailableAsync())) {
-      return erreurMetier(CODE_ERREUR_SELECTEUR, MESSAGE_AUCUNE_APPLICATION);
+      return erreurMetier(CODE_ERREUR_SELECTEUR, MESSAGE_OUVERTURE_IMPOSSIBLE);
     }
     await Sharing.shareAsync(uriLocale, {
       dialogTitle: 'Ouvrir avec…',
@@ -356,9 +452,10 @@ export async function openWithSystemPicker({
     return ok(undefined);
   } catch (erreur) {
     const details = (erreur instanceof Error ? erreur.message : String(erreur ?? '')).toLowerCase();
+    console.log('[OMDA debug] feuille « Ouvrir avec… » en échec :', details);
     if (INDICES_AUCUNE_APPLICATION.some((indice) => details.includes(indice))) {
-      return erreurMetier(CODE_ERREUR_SELECTEUR, MESSAGE_AUCUNE_APPLICATION);
+      return erreurMetier(CODE_ERREUR_AUCUNE_APPLICATION, MESSAGE_AUCUNE_APPLICATION);
     }
-    return erreurMetier(CODE_ERREUR_OUVERTURE_AVEC, MESSAGE_OUVERTURE_AVEC);
+    return erreurMetier(CODE_ERREUR_OUVERTURE_AVEC, MESSAGE_OUVERTURE_IMPOSSIBLE);
   }
 }

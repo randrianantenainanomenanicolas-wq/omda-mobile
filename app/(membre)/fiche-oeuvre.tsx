@@ -31,6 +31,7 @@ import {
   estFichierAudio,
   formaterTailleFichier,
   messageErreurOuverture,
+  mimeTypeDepuisNom,
   openWithSystemPicker,
 } from '../../src/utils';
 
@@ -390,17 +391,20 @@ export default function FicheOeuvreScreen() {
         return;
       }
 
+      const nomDuDocument = nomFichier(document.chemin_stockage);
       const ouverture = await openWithSystemPicker({
         uri: uriResolue,
-        fileName: nomFichier(document.chemin_stockage),
+        fileName: nomDuDocument,
+        mimeType: mimeTypeDepuisNom(nomDuDocument || uriResolue),
       });
 
       /**
        * `info` et non `success` : le sélecteur « Ouvrir avec… » est une action
        * confiée au téléphone, ce n'est pas une information confirmée par le
        * serveur OMDA. Sur un échec, aucun titre : le message porte la cause
-       * exacte (fichier introuvable, téléchargement échoué, aucune application
-       * disponible, application choisie en échec ou repli générique).
+       * exacte (« Aucune application n'est disponible… », « Aperçu indisponible :
+       * le fichier n'est pas accessible… », « Fichier introuvable. » ou repli
+       * « Ouverture impossible. Réessayez. »).
        */
       setMessageAction(
         ouverture.ok
