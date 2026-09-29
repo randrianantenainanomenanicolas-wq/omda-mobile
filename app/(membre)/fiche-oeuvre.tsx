@@ -18,6 +18,7 @@ import {
 } from '../../src/components/ui';
 import {
   STATUTS_OEUVRE_MODIFIABLES,
+  type AttestationDiffusion,
   type Categorie,
   type Oeuvre,
   type StatutOeuvre,
@@ -46,6 +47,16 @@ import { estFichierAudio } from '../../src/utils';
  *   paiement confirmé `REUSSI` ;
  * - le montant des frais de dépôt vient du service (`estimerMontant`), jamais de
  *   l'écran ; 4 états obligatoires : chargement / erreur / vide / contenu ;
+ * - la fiche ouvre sur une section « Informations sur l'œuvre » TOUJOURS affichée
+ *   dès que l'œuvre est chargée (titre, statut, catégorie, année, description,
+ *   date de création, envoi à l'OMDA, décision, fichier déposé) : une valeur
+ *   absente s'affiche « — », aucune section n'est masquée pour autant ;
+ * - l'« Attestation de diffusion » (règle métier 8) est chargée EN PARALLÈLE de
+ *   l'œuvre (`listerAttestationsOeuvre`) et présentée en LECTURE SEULE : pastille
+ *   « Ajoutée » / « Manquante » + nom du fichier, sans aucun bouton d'ouverture ni
+ *   de partage ;
+ * - ces deux sections ne dépendent PAS du type de fichier (un PDF, une image et un
+ *   MP3 affichent les mêmes informations) ;
  * - seule l'écoute intégrée reste proposée (`AudioPreview`) : « Écouter l'œuvre »
  *   demande un lien temporaire au service puis joue la piste dans l'application ;
  *   la fiche n'ouvre AUCUN document avec une autre application et ne propose
@@ -121,14 +132,18 @@ export default function FicheOeuvreScreen() {
   const [categorie, setCategorie] = useState<Categorie | null>(null);
   const [fraisDepot, setFraisDepot] = useState<EstimationMontant | null>(null);
   const [erreurFrais, setErreurFrais] = useState<string | null>(null);
+  /** Attestations de diffusion de l'œuvre (règle métier 8), lues par le service. */
+  const [attestations, setAttestations] = useState<AttestationDiffusion[]>([]);
+  const [erreurAttestations, setErreurAttestations] = useState<string | null>(null);
   /** Lien temporaire de l'œuvre audio : demandé au service au premier « Écouter ». */
   const [urlAudio, setUrlAudio] = useState<string | null>(null);
   const [chargementAudio, setChargementAudio] = useState(false);
   const [erreurAudio, setErreurAudio] = useState<string | null>(null);
 
   /**
-   * Charge la fiche : l'œuvre (statut faisant foi), le référentiel des catégories
-   * et — uniquement pour une œuvre `VALIDEE` — le montant des frais de dépôt.
+   * Charge la fiche : l'œuvre (statut faisant foi), le référentiel des catégories,
+   * ses attestations de diffusion (règle métier 8) et — uniquement pour une œuvre
+   * `VALIDEE` — le montant des frais de dépôt.
    */
   const chargerFiche = useCallback(async () => {
     if (!oeuvreId) {
@@ -144,6 +159,8 @@ export default function FicheOeuvreScreen() {
     setMessageErreur('');
     setErreurFrais(null);
     setFraisDepot(null);
+    setErreurAttestations(null);
+    setAttestations([]);
     /**
      * Le lien d'écoute est TEMPORAIRE : il ne survit pas à un rechargement de la
      * fiche (l'œuvre a pu être remplacée).
@@ -172,7 +189,7 @@ export default function FicheOeuvreScreen() {
 
       const oeuvreChargee = reponse.valeur;
 
-      const [reponseCategories, reponseFrais] = await Promise.all([
+      const [reponseCategories, reponseFrais, reponseAttestations] = await Promise.all([
         mockPublicContentService.listerCategories(),
         oeuvreChargee.statut === 'VALIDEE'
           ? mockPublicContentService.estimerMontant({
@@ -180,6 +197,7 @@ export default function FicheOeuvreScreen() {
               categorie_id: oeuvreChargee.categorie_id,
             })
           : Promise.resolve(null),
+        mockMemberRepository.listerAttestationsOeuvre(oeuvreChargee.id),
       ]);
 
       setOeuvre(oeuvreChargee);
@@ -197,6 +215,14 @@ export default function FicheOeuvreScreen() {
         } else {
           setErreurFrais(traduireErreur(reponseFrais.erreur));
         }
+      }
+
+      /** Attestations de diffusion : au moins une par œuvre (règle métier 8). */
+      if (reponseAttestations.ok) {
+        setAttestations(reponseAttestations.valeur);
+      } else {
+        setAttestations([]);
+        setErreurAttestations(traduireErreur(reponseAttestations.erreur));
       }
 
       setEtat('contenu');
@@ -363,6 +389,11 @@ export default function FicheOeuvreScreen() {
   const dateSoumission = formaterDateCourte(oeuvre.date_soumission);
   const dateDecision = formaterDateCourte(oeuvre.date_decision);
   const fichier = nomFichier(oeuvre.chemin_fichier);
+  const dateCreation = formaterDateCourte(oeuvre.created_at);
+  /** Attestations exploitables : un chemin de stockage est nécessaire (règle métier 8). */
+  const attestationsUtiles = attestations.filter(
+    (attestation) => attestation.chemin_stockage.trim().length > 0,
+  );
   const enExamen = STATUTS_EN_EXAMEN.includes(oeuvre.statut);
   /** L'œuvre peut encore être corrigée : brouillon, envoyée ou en cours d'examen. */
   const modifiable = STATUTS_OEUVRE_MODIFIABLES.includes(oeuvre.statut);
@@ -370,41 +401,92 @@ export default function FicheOeuvreScreen() {
   return (
     <ScreenContainer titre="Fiche de l’œuvre" sousTitre="Espace membre">
       <View className="w-full rounded-2xl border border-omda-borderGray bg-omda-white p-5">
-        <Text className="text-2xl font-bold text-omda-black">{oeuvre.titre}</Text>
+        <Text className="text-lg font-bold text-omda-black">Informations sur l’œuvre</Text>
 
-        <View className="mt-2 flex-row items-center">
-          <Icone nom="tag" taille={14} classeCouleur="text-omda-textGray" />
-          <Text className="ml-2 flex-1 text-base text-omda-textGray">
-            {categorie ? categorie.libelle : 'Catégorie non précisée'}
-            {oeuvre.annee ? ` — ${oeuvre.annee}` : ''}
-          </Text>
-        </View>
+        <Text className="mt-2 text-2xl font-bold text-omda-black">{oeuvre.titre}</Text>
 
         <View className="mt-3">
           <StatusPill statut={statut.variante} libelle={statut.libelle} />
         </View>
 
-        {oeuvre.description ? (
-          <Text className="mt-3 text-base text-omda-black">{oeuvre.description}</Text>
-        ) : null}
-
         <View className="mt-4 gap-2">
+          <LigneInfo icone="tag" libelle="Catégorie" valeur={categorie ? categorie.libelle : '—'} />
           <LigneInfo
-            icone="file-lines"
-            libelle="Fichier déposé"
-            valeur={fichier || 'Aucun fichier pour le moment'}
+            icone="calendar-days"
+            libelle="Année"
+            valeur={oeuvre.annee ? String(oeuvre.annee) : '—'}
           />
-          <LigneInfo
-            icone="paper-plane"
-            libelle="Envoi à l’OMDA"
-            valeur={dateSoumission || 'Pas encore envoyée'}
-          />
+          <LigneInfo icone="calendar-plus" libelle="Date de création" valeur={dateCreation || '—'} />
+          <LigneInfo icone="paper-plane" libelle="Envoi à l’OMDA" valeur={dateSoumission || '—'} />
           <LigneInfo
             icone="clipboard-check"
             libelle="Décision de l’OMDA"
-            valeur={dateDecision || 'En attente'}
+            valeur={dateDecision || '—'}
           />
+          <LigneInfo icone="file-lines" libelle="Fichier déposé" valeur={fichier || '—'} />
         </View>
+
+        <View className="mt-4">
+          <Text className="text-sm text-omda-textGray">Description</Text>
+          <Text className="mt-1 text-base text-omda-black">
+            {oeuvre.description?.trim() ? oeuvre.description : '—'}
+          </Text>
+        </View>
+      </View>
+
+      <View className="mt-5 w-full rounded-2xl border border-omda-borderGray bg-omda-white p-5">
+        <Text className="text-lg font-bold text-omda-black">Attestation de diffusion</Text>
+        <Text className="mt-1 text-sm text-omda-textGray">
+          Document exigé pour chaque œuvre (au moins une attestation) : informations en lecture
+          seule, aucune ouverture ni partage depuis cette fiche.
+        </Text>
+
+        {erreurAttestations ? (
+          <View className="mt-3">
+            <InfoBanner
+              variante="error"
+              titre="Attestation indisponible"
+              message={erreurAttestations}
+              actionLibelle="Réessayer"
+              onAction={() => void chargerFiche()}
+            />
+          </View>
+        ) : (
+          <>
+            <View className="mt-3">
+              <StatusPill
+                statut={attestationsUtiles.length > 0 ? 'info' : 'error'}
+                libelle={attestationsUtiles.length > 0 ? 'Ajoutée' : 'Manquante'}
+              />
+            </View>
+
+            {attestationsUtiles.length > 0 ? (
+              <View className="mt-3 gap-2">
+                {attestationsUtiles.map((attestation) => (
+                  <View
+                    key={attestation.id}
+                    className="rounded-xl border border-omda-borderGray bg-omda-warmGray p-3"
+                  >
+                    <View className="flex-row items-center">
+                      <Icone nom="file-lines" taille={14} classeCouleur="text-omda-textGray" />
+                      <Text className="ml-2 flex-1 text-base text-omda-black">
+                        {nomFichier(attestation.chemin_stockage)}
+                      </Text>
+                    </View>
+                    <Text className="mt-1 text-sm text-omda-textGray">
+                      {`Ajoutée le ${formaterDateCourte(attestation.created_at) || '—'}`}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            ) : (
+              <Text className="mt-2 text-base text-omda-textGray">
+                Aucune attestation de diffusion n’est enregistrée pour cette œuvre. Ajoutez-la
+                depuis « Reprendre le dépôt » ou « Modifier les informations ».
+              </Text>
+            )}
+          </>
+        )}
       </View>
 
       {estAudio ? (
