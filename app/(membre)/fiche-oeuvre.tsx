@@ -361,6 +361,52 @@ export default function FicheOeuvreScreen() {
     [],
   );
 
+  /* ----------------------- Valeurs dérivées — hooks TOUJOURS inconditionnels */
+
+  /**
+   * ⚠️ Tous les hooks de l'écran sont appelés ICI, AVANT les retours anticipés
+   * des états `chargement` / `erreur` / `vide` : React exige le même nombre de
+   * hooks, dans le même ordre, à chaque rendu — sinon il lève « Rendered more
+   * hooks than during the previous render » dès le passage chargement → contenu.
+   * Le `useMemo` ci-dessous tolère donc `oeuvre === null` au lieu d'être placé
+   * après les retours.
+   */
+  const estAudio = Boolean(oeuvre?.chemin_fichier) && estFichierAudio(oeuvre?.mime_type);
+
+  /** Documents consultables depuis la fiche : l'œuvre déposée, puis ses attestations. */
+  const documents = useMemo<DocumentFiche[]>(() => {
+    if (!oeuvre) {
+      return [];
+    }
+
+    const liste: DocumentFiche[] = [];
+
+    if (oeuvre.chemin_fichier && oeuvre.mime_type) {
+      liste.push({
+        identifiant: `oeuvre:${oeuvre.id}`,
+        libelle: 'Œuvre déposée',
+        chemin_stockage: oeuvre.chemin_fichier,
+        mime_type: oeuvre.mime_type,
+        taille_octets: oeuvre.taille_octets,
+      });
+    }
+
+    attestations.forEach((attestation, index) => {
+      liste.push({
+        identifiant: `attestation:${attestation.id}`,
+        libelle:
+          attestations.length > 1
+            ? `Attestation de diffusion ${index + 1}`
+            : 'Attestation de diffusion',
+        chemin_stockage: attestation.chemin_stockage,
+        mime_type: attestation.mime_type,
+        taille_octets: attestation.taille_octets,
+      });
+    });
+
+    return liste;
+  }, [attestations, oeuvre]);
+
   /* ------------------------------------------------------ États de l'écran */
 
   if (etat === 'chargement') {
@@ -405,39 +451,6 @@ export default function FicheOeuvreScreen() {
   const enExamen = STATUTS_EN_EXAMEN.includes(oeuvre.statut);
   /** L'œuvre peut encore être corrigée : brouillon, envoyée ou en cours d'examen. */
   const modifiable = STATUTS_OEUVRE_MODIFIABLES.includes(oeuvre.statut);
-
-  /** Œuvre audio : elle peut être écoutée sans quitter l'application. */
-  const estAudio = estFichierAudio(oeuvre.mime_type) && Boolean(oeuvre.chemin_fichier);
-
-  /** Documents consultables depuis la fiche : l'œuvre déposée, puis ses attestations. */
-  const documents = useMemo<DocumentFiche[]>(() => {
-    const liste: DocumentFiche[] = [];
-
-    if (oeuvre.chemin_fichier && oeuvre.mime_type) {
-      liste.push({
-        identifiant: `oeuvre:${oeuvre.id}`,
-        libelle: 'Œuvre déposée',
-        chemin_stockage: oeuvre.chemin_fichier,
-        mime_type: oeuvre.mime_type,
-        taille_octets: oeuvre.taille_octets,
-      });
-    }
-
-    attestations.forEach((attestation, index) => {
-      liste.push({
-        identifiant: `attestation:${attestation.id}`,
-        libelle:
-          attestations.length > 1
-            ? `Attestation de diffusion ${index + 1}`
-            : 'Attestation de diffusion',
-        chemin_stockage: attestation.chemin_stockage,
-        mime_type: attestation.mime_type,
-        taille_octets: attestation.taille_octets,
-      });
-    });
-
-    return liste;
-  }, [attestations, oeuvre]);
 
   return (
     <ScreenContainer titre="Fiche de l’œuvre" sousTitre="Espace membre">
