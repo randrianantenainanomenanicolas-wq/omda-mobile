@@ -30,8 +30,8 @@ import { mockMemberRepository, mockPublicContentService } from '../../src/servic
 import {
   estFichierAudio,
   formaterTailleFichier,
-  ouvrirFichier,
-  partagerFichier,
+  messageErreurOuverture,
+  openWithSystemPicker,
 } from '../../src/utils';
 
 /**
@@ -54,8 +54,12 @@ import {
  * - le montant des frais de dépôt vient du service (`estimerMontant`), jamais de
  *   l'écran ; 4 états obligatoires : chargement / erreur / vide / contenu ;
  * - les documents enregistrés (œuvre déposée et attestations de diffusion) sont
- *   consultables : écoute intégrée pour une œuvre audio (`AudioPreview`),
- *   ouverture ou partage pour tous les documents ;
+ *   consultables : écoute intégrée pour une œuvre audio (`AudioPreview`) et
+ *   ouverture via le sélecteur système « Ouvrir avec… »
+ *   (`openWithSystemPicker`) pour tous les documents — l'interface ne propose
+ *   AUCUNE action de partage ; un échec d'ouverture affiche la cause exacte
+ *   (fichier introuvable / téléchargement / aucune application / repli
+ *   générique) avec un bouton « Réessayer » ;
  * - le lien d'un document est TEMPORAIRE et vient TOUJOURS du service
  *   (`obtenirUrlFichier`) : l'écran ne construit jamais de lien depuis un chemin
  *   de stockage (bucket privé), et ne le prépare qu'à la demande de l'utilisateur.
@@ -149,7 +153,11 @@ export default function FicheOeuvreScreen() {
   const [actionEnCours, setActionEnCours] = useState<string | null>(null);
   const [messageAction, setMessageAction] = useState<{
     variante: VarianteBanner;
+    /** Absent sur un échec : le message porte alors la cause exacte à afficher. */
+    titre?: string;
     texte: string;
+    /** Document concerné : permet de proposer « Réessayer » après un échec. */
+    document?: DocumentFiche;
   } | null>(null);
 
   /**
@@ -308,7 +316,26 @@ export default function FicheOeuvreScreen() {
         setErreurAudio(traduireErreur(reponse.erreur));
         return;
       }
-      setUrlAudio(reponse.valeur.url);
+
+      const urlResolue = reponse.valeur.url.trim();
+      /**
+       * TODO — diagnostic temporaire (bugfix aperçu) : confirmer que le service
+       * renvoie bien une URI réelle (`file://`, `content://` ou `https://`) et
+       * JAMAIS un chemin de bucket brut. À retirer après validation sur appareil.
+       */
+      console.log(
+        '[OMDA — diagnostic] URI audio résolue :',
+        urlResolue || '(vide)',
+        '| chemin :',
+        cheminStockage,
+      );
+
+      if (urlResolue.length === 0) {
+        setUrlAudio(null);
+        setErreurAudio('Aperçu indisponible pour le moment.');
+        return;
+      }
+      setUrlAudio(urlResolue);
     } catch {
       setUrlAudio(null);
       setErreurAudio(
@@ -320,46 +347,86 @@ export default function FicheOeuvreScreen() {
   }, [oeuvre]);
 
   /**
-   * Ouvre ou partage un document stocké : le lien temporaire est demandé au
-   * service, puis l'action est confiée au système (application associée ou
-   * feuille de partage).
+   * Ouvre un document stocké : le lien temporaire est demandé au service, puis
+   * le sélecteur système « Ouvrir avec… » (`openWithSystemPicker`) laisse
+   * l'utilisateur choisir l'application — téléchargement préalable dans le
+   * cache quand le lien est distant.
    */
-  const agirSurDocument = useCallback(
-    async (document: DocumentFiche, action: 'ouvrir' | 'partager') => {
-      setActionEnCours(`${document.identifiant}:${action}`);
-      setMessageAction(null);
-      try {
-        const reponse = await mockMemberRepository.obtenirUrlFichier(document.chemin_stockage);
-        if (!reponse.ok) {
-          setMessageAction({ variante: 'error', texte: traduireErreur(reponse.erreur) });
-          return;
-        }
-
-        const options = { titre: document.libelle, mimeType: document.mime_type };
-        const retour =
-          action === 'partager'
-            ? await partagerFichier(reponse.valeur.url, options)
-            : await ouvrirFichier(reponse.valeur.url, options);
-
-        /**
-         * `info` et non `success` : l'action a été confiée au téléphone, ce n'est
-         * pas une information confirmée par le serveur OMDA.
-         */
-        setMessageAction({
-          variante: retour.statut === 'reussi' ? 'info' : 'error',
-          texte: retour.message,
-        });
-      } catch {
+  const ouvrirDocument = useCallback(async (document: DocumentFiche) => {
+    setActionEnCours(document.identifiant);
+    setMessageAction(null);
+    try {
+      const reponse = await mockMemberRepository.obtenirUrlFichier(document.chemin_stockage);
+      if (!reponse.ok) {
         setMessageAction({
           variante: 'error',
-          texte: 'L’action demandée a échoué. Vérifiez votre connexion Internet puis réessayez.',
+          texte: messageErreurOuverture(
+            reponse.erreur.type === 'metier' ? reponse.erreur.code : undefined,
+          ),
+          document,
         });
-      } finally {
-        setActionEnCours(null);
+        return;
       }
-    },
-    [],
-  );
+
+      const uriResolue = reponse.valeur.url.trim();
+      /**
+       * TODO — diagnostic temporaire (bugfix aperçu) : confirmer que le service
+       * renvoie bien une URI réelle (`file://`, `content://` ou `https://`) et
+       * JAMAIS un chemin de bucket brut. À retirer après validation sur appareil.
+       */
+      console.log(
+        '[OMDA — diagnostic] URI document résolue :',
+        uriResolue || '(vide)',
+        '| fichier :',
+        nomFichier(document.chemin_stockage),
+      );
+
+      if (uriResolue.length === 0) {
+        setMessageAction({
+          variante: 'error',
+          texte: messageErreurOuverture(CODES_ERREUR_MEMBRE.FICHIER_INTROUVABLE),
+          document,
+        });
+        return;
+      }
+
+      const ouverture = await openWithSystemPicker({
+        uri: uriResolue,
+        fileName: nomFichier(document.chemin_stockage),
+      });
+
+      /**
+       * `info` et non `success` : le sélecteur « Ouvrir avec… » est une action
+       * confiée au téléphone, ce n'est pas une information confirmée par le
+       * serveur OMDA. Sur un échec, aucun titre : le message porte la cause
+       * exacte (fichier introuvable, téléchargement échoué, aucune application
+       * disponible, application choisie en échec ou repli générique).
+       */
+      setMessageAction(
+        ouverture.ok
+          ? {
+              variante: 'info',
+              titre: 'Document ouvert',
+              texte: 'Le document a été ouvert avec l’application choisie sur votre téléphone.',
+            }
+          : {
+              variante: 'error',
+              texte: messageErreurOuverture(
+                ouverture.erreur.type === 'metier' ? ouverture.erreur.code : undefined,
+              ),
+              document,
+            },
+      );
+    } catch {
+      setMessageAction({
+        variante: 'error',
+        texte: messageErreurOuverture(undefined),
+        document,
+      });
+    } finally {
+      setActionEnCours(null);
+    }
+  }, []);
 
   /* ----------------------- Valeurs dérivées — hooks TOUJOURS inconditionnels */
 
@@ -406,6 +473,9 @@ export default function FicheOeuvreScreen() {
 
     return liste;
   }, [attestations, oeuvre]);
+
+  /** Document dont l'ouverture a échoué : alimente le bouton « Réessayer » du compte rendu. */
+  const documentEchoue = messageAction?.document ?? null;
 
   /* ------------------------------------------------------ États de l'écran */
 
@@ -496,14 +566,18 @@ export default function FicheOeuvreScreen() {
         <View className="mt-5 w-full rounded-2xl border border-omda-borderGray bg-omda-white p-5">
           <Text className="text-lg font-bold text-omda-black">Mes documents</Text>
           <Text className="mt-1 text-sm text-omda-textGray">
-            Écoutez une œuvre audio dans l’application, ou ouvrez et partagez un document avec les
-            applications de votre téléphone.
+            Écoutez une œuvre audio dans l’application, ou ouvrez un document avec l’application
+            adaptée de votre téléphone.
           </Text>
 
           {estAudio ? (
             <>
               {urlAudio ? (
-                <AudioPreview libelle={oeuvre.titre} url={urlAudio} />
+                <AudioPreview
+                  libelle={oeuvre.titre}
+                  url={urlAudio}
+                  onReessayer={() => void ecouterOeuvre()}
+                />
               ) : (
                 <View className="mt-3">
                   <Button
@@ -553,22 +627,14 @@ export default function FicheOeuvreScreen() {
                 </View>
               </View>
 
-              <View className="mt-3 gap-3">
+              <View className="mt-3">
                 <Button
-                  libelle="Ouvrir le document"
+                  libelle="Ouvrir le fichier"
                   variante="secondary"
                   icone="up-right-from-square"
                   pleineLargeur
-                  chargement={actionEnCours === `${document.identifiant}:ouvrir`}
-                  onPress={() => void agirSurDocument(document, 'ouvrir')}
-                />
-                <Button
-                  libelle="Partager le document"
-                  variante="secondary"
-                  icone="share-nodes"
-                  pleineLargeur
-                  chargement={actionEnCours === `${document.identifiant}:partager`}
-                  onPress={() => void agirSurDocument(document, 'partager')}
+                  chargement={actionEnCours === document.identifiant}
+                  onPress={() => void ouvrirDocument(document)}
                 />
               </View>
             </View>
@@ -590,8 +656,14 @@ export default function FicheOeuvreScreen() {
             <View className="mt-4">
               <InfoBanner
                 variante={messageAction.variante}
-                titre={messageAction.variante === 'error' ? 'Action impossible' : 'Action effectuée'}
+                titre={messageAction.titre}
                 message={messageAction.texte}
+                actionLibelle={messageAction.variante === 'error' ? 'Réessayer' : undefined}
+                onAction={
+                  messageAction.variante === 'error' && documentEchoue
+                    ? () => void ouvrirDocument(documentEchoue)
+                    : undefined
+                }
               />
             </View>
           ) : null}
