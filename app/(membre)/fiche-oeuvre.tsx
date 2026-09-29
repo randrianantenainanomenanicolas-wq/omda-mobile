@@ -27,12 +27,7 @@ import {
 import { CODES_ERREUR_MEMBRE } from '../../src/services/contracts';
 import type { ErreurApp, EstimationMontant } from '../../src/services/contracts';
 import { mockMemberRepository, mockPublicContentService } from '../../src/services/mocks';
-import {
-  estFichierAudio,
-  formaterTailleFichier,
-  ouvrirFichier,
-  partagerFichier,
-} from '../../src/utils';
+import { estFichierAudio, formaterTailleFichier, openFile } from '../../src/utils';
 
 /**
  * Écran S — Fiche d'une œuvre (hors onglets).
@@ -54,8 +49,9 @@ import {
  * - le montant des frais de dépôt vient du service (`estimerMontant`), jamais de
  *   l'écran ; 4 états obligatoires : chargement / erreur / vide / contenu ;
  * - les documents enregistrés (œuvre déposée et attestations de diffusion) sont
- *   consultables : écoute intégrée pour une œuvre audio (`AudioPreview`),
- *   ouverture ou partage pour tous les documents ;
+ *   consultables : écoute intégrée pour une œuvre audio (`AudioPreview`) et
+ *   ouverture dans l'application adaptée du téléphone (`openFile`) pour tous les
+ *   documents — l'interface ne propose AUCUNE action de partage ;
  * - le lien d'un document est TEMPORAIRE et vient TOUJOURS du service
  *   (`obtenirUrlFichier`) : l'écran ne construit jamais de lien depuis un chemin
  *   de stockage (bucket privé), et ne le prépare qu'à la demande de l'utilisateur.
@@ -149,6 +145,7 @@ export default function FicheOeuvreScreen() {
   const [actionEnCours, setActionEnCours] = useState<string | null>(null);
   const [messageAction, setMessageAction] = useState<{
     variante: VarianteBanner;
+    titre: string;
     texte: string;
   } | null>(null);
 
@@ -320,46 +317,57 @@ export default function FicheOeuvreScreen() {
   }, [oeuvre]);
 
   /**
-   * Ouvre ou partage un document stocké : le lien temporaire est demandé au
-   * service, puis l'action est confiée au système (application associée ou
-   * feuille de partage).
+   * Ouvre un document stocké : le lien temporaire est demandé au service, puis
+   * l'ouverture est confiée au système — `openFile` (navigateur intégré pour un
+   * lien distant, application associée du téléphone pour un fichier local).
    */
-  const agirSurDocument = useCallback(
-    async (document: DocumentFiche, action: 'ouvrir' | 'partager') => {
-      setActionEnCours(`${document.identifiant}:${action}`);
-      setMessageAction(null);
-      try {
-        const reponse = await mockMemberRepository.obtenirUrlFichier(document.chemin_stockage);
-        if (!reponse.ok) {
-          setMessageAction({ variante: 'error', texte: traduireErreur(reponse.erreur) });
-          return;
-        }
-
-        const options = { titre: document.libelle, mimeType: document.mime_type };
-        const retour =
-          action === 'partager'
-            ? await partagerFichier(reponse.valeur.url, options)
-            : await ouvrirFichier(reponse.valeur.url, options);
-
-        /**
-         * `info` et non `success` : l'action a été confiée au téléphone, ce n'est
-         * pas une information confirmée par le serveur OMDA.
-         */
-        setMessageAction({
-          variante: retour.statut === 'reussi' ? 'info' : 'error',
-          texte: retour.message,
-        });
-      } catch {
+  const ouvrirDocument = useCallback(async (document: DocumentFiche) => {
+    setActionEnCours(document.identifiant);
+    setMessageAction(null);
+    try {
+      const reponse = await mockMemberRepository.obtenirUrlFichier(document.chemin_stockage);
+      if (!reponse.ok) {
         setMessageAction({
           variante: 'error',
-          texte: 'L’action demandée a échoué. Vérifiez votre connexion Internet puis réessayez.',
+          titre: 'Ouverture impossible',
+          texte: traduireErreur(reponse.erreur),
         });
-      } finally {
-        setActionEnCours(null);
+        return;
       }
-    },
-    [],
-  );
+
+      const ouverture = await openFile({
+        uri: reponse.valeur.url,
+        fileName: nomFichier(document.chemin_stockage),
+      });
+
+      /**
+       * `info` et non `success` : l'ouverture a été confiée au téléphone, ce n'est
+       * pas une information confirmée par le serveur OMDA.
+       */
+      setMessageAction(
+        ouverture.ok
+          ? {
+              variante: 'info',
+              titre: 'Document ouvert',
+              texte: 'Le document a été ouvert dans l’application adaptée de votre téléphone.',
+            }
+          : {
+              variante: 'error',
+              titre: 'Ouverture impossible',
+              texte: ouverture.erreur.message,
+            },
+      );
+    } catch {
+      setMessageAction({
+        variante: 'error',
+        titre: 'Ouverture impossible',
+        texte:
+          'Le document n’a pas pu être ouvert. Vérifiez votre connexion Internet puis réessayez.',
+      });
+    } finally {
+      setActionEnCours(null);
+    }
+  }, []);
 
   /* ----------------------- Valeurs dérivées — hooks TOUJOURS inconditionnels */
 
@@ -553,22 +561,14 @@ export default function FicheOeuvreScreen() {
                 </View>
               </View>
 
-              <View className="mt-3 gap-3">
+              <View className="mt-3">
                 <Button
-                  libelle="Ouvrir le document"
+                  libelle="Ouvrir le fichier"
                   variante="secondary"
                   icone="up-right-from-square"
                   pleineLargeur
-                  chargement={actionEnCours === `${document.identifiant}:ouvrir`}
-                  onPress={() => void agirSurDocument(document, 'ouvrir')}
-                />
-                <Button
-                  libelle="Partager le document"
-                  variante="secondary"
-                  icone="share-nodes"
-                  pleineLargeur
-                  chargement={actionEnCours === `${document.identifiant}:partager`}
-                  onPress={() => void agirSurDocument(document, 'partager')}
+                  chargement={actionEnCours === document.identifiant}
+                  onPress={() => void ouvrirDocument(document)}
                 />
               </View>
             </View>
@@ -590,7 +590,7 @@ export default function FicheOeuvreScreen() {
             <View className="mt-4">
               <InfoBanner
                 variante={messageAction.variante}
-                titre={messageAction.variante === 'error' ? 'Action impossible' : 'Action effectuée'}
+                titre={messageAction.titre}
                 message={messageAction.texte}
               />
             </View>
