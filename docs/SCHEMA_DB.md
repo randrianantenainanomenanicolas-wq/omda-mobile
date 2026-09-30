@@ -1,38 +1,33 @@
-# OMDA — DB_SUPABASE (PostgreSQL / Supabase)
-Version : 1.0
+# OMDA — Base de données Supabase (MVOLA uniquement)
 
-Ce document contient :
-1) Le script SQL complet fourni (schéma + storage + RLS + trigger Supabase Auth)
-2) Un ADDENDUM recommandé pour gérer l’activation/désactivation des opérateurs Mobile Money (MVola / Orange Money / Airtel Money)
-
----
-
-## 1) Script SQL — Schéma + Storage + RLS + Auth trigger (COMPLET)
+Ce document contient l'intégralité du script SQL de la base de données OMDA, nettoyé de toute référence au virement bancaire et configuré exclusivement pour les paiements via Mobile Money (**MVOLA**).
 
 ```sql
 -- ============================================================
--- OMDA — schéma PostgreSQL
+-- OMDA — DB_SUPABASE (sans virement, MVOLA uniquement)
+-- PostgreSQL / Supabase
 -- ============================================================
 
-CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+-- Extension
+create extension if not exists "pgcrypto";
 
--- ------------------------------------------------------------
--- Types énumérés
--- ------------------------------------------------------------
+-- ============================================================
+-- Types énumérés (SANS virement)
+-- ============================================================
 
-CREATE TYPE role_utilisateur AS ENUM (
+create type role_utilisateur as enum (
   'MEMBRE',
   'AGENT',
   'ADMINISTRATEUR'
 );
 
-CREATE TYPE statut_utilisateur AS ENUM (
+create type statut_utilisateur as enum (
   'ACTIF',
   'DESACTIVE',
   'EN_ATTENTE_CHANGEMENT_MDP'
 );
 
-CREATE TYPE statut_demande AS ENUM (
+create type statut_demande as enum (
   'BROUILLON',
   'ENVOYEE',
   'EN_COURS_DE_VERIFICATION',
@@ -41,7 +36,7 @@ CREATE TYPE statut_demande AS ENUM (
   'ADHESION_TERMINEE'
 );
 
-CREATE TYPE type_piece AS ENUM (
+create type type_piece as enum (
   'PHOTO',
   'CIN',
   'ACTE_NAISSANCE',
@@ -50,7 +45,7 @@ CREATE TYPE type_piece AS ENUM (
   'AUTRE'
 );
 
-CREATE TYPE statut_oeuvre AS ENUM (
+create type statut_oeuvre as enum (
   'BROUILLON',
   'ENVOYEE',
   'EN_COURS_DE_VALIDATION',
@@ -59,46 +54,40 @@ CREATE TYPE statut_oeuvre AS ENUM (
   'DEPOT_FINALISE'
 );
 
-CREATE TYPE type_paiement AS ENUM (
+create type type_paiement as enum (
   'ADHESION',
   'DEPOT_OEUVRE',
   'COTISATION'
 );
 
-CREATE TYPE mode_paiement AS ENUM (
-  'MOBILE_MONEY',
-  'VIREMENT_BANCAIRE'
-);
+-- Paiement : Mobile Money uniquement
+create type mode_paiement as enum ('MOBILE_MONEY');
 
-CREATE TYPE operateur_paiement AS ENUM (
-  'MVOLA',
-  'ORANGE_MONEY',
-  'AIRTEL_MONEY'
-);
+-- Opérateur unique
+create type operateur_paiement as enum ('MVOLA');
 
-CREATE TYPE statut_paiement AS ENUM (
+-- Statuts paiement : suppression des statuts virement
+create type statut_paiement as enum (
   'INITIE',
   'EN_ATTENTE_CONFIRMATION',
-  'EN_ATTENTE_PREUVE',
-  'EN_ATTENTE_VERIFICATION_AGENT',
   'REUSSI',
   'ECHEC_SOLDE_INSUFFISANT',
   'ECHEC_AUTRE',
   'REJETE'
 );
 
-CREATE TYPE type_operation_tarif AS ENUM (
+create type type_operation_tarif as enum (
   'ADHESION',
   'DEPOT_OEUVRE',
   'COTISATION'
 );
 
-CREATE TYPE statut_cotisation AS ENUM (
+create type statut_cotisation as enum (
   'NON_PAYEE',
   'PAYEE'
 );
 
-CREATE TYPE statut_adhesion_categorie AS ENUM (
+create type statut_adhesion_categorie as enum (
   'ACTIVE',
   'EN_ATTENTE',
   'INACTIVE',
@@ -106,7 +95,8 @@ CREATE TYPE statut_adhesion_categorie AS ENUM (
   'ANNULEE'
 );
 
-CREATE TYPE type_notification AS ENUM (
+-- Notifications : suppression de VIREMENT_VALIDE / VIREMENT_REJETE
+create type type_notification as enum (
   'DEMANDE_ENVOYEE',
   'DEMANDE_VALIDEE',
   'DEMANDE_REJETEE',
@@ -115,764 +105,641 @@ CREATE TYPE type_notification AS ENUM (
   'PAIEMENT_ECHEC',
   'OEUVRE_VALIDEE',
   'OEUVRE_REJETEE',
-  'VIREMENT_VALIDE',
-  'VIREMENT_REJETE',
   'IDENTIFIANTS_ENVOYES',
   'GLOBALE'
 );
 
--- ------------------------------------------------------------
+-- ============================================================
 -- Référentiels
--- ------------------------------------------------------------
+-- ============================================================
 
-CREATE TABLE categorie (
-  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  code          TEXT NOT NULL UNIQUE,
-  libelle       TEXT NOT NULL,
-  description   TEXT,
-  actif         BOOLEAN NOT NULL DEFAULT TRUE,
-  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+create table categorie (
+  id            uuid primary key default gen_random_uuid(),
+  code          text not null unique,
+  libelle       text not null,
+  description   text,
+  actif         boolean not null default true,
+  created_at    timestamptz not null default now(),
+  updated_at    timestamptz not null default now()
 );
 
-CREATE TABLE tarif (
-  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  type_operation  type_operation_tarif NOT NULL,
-  categorie_id    UUID REFERENCES categorie(id),
-  montant         INTEGER NOT NULL CHECK (montant >= 0),
-  devise          CHAR(3) NOT NULL DEFAULT 'MGA',
-  actif           BOOLEAN NOT NULL DEFAULT TRUE,
-  date_debut      DATE,
-  date_fin        DATE,
-  created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
-  CONSTRAINT tarif_dates_chk CHECK (date_fin IS NULL OR date_debut IS NULL OR date_fin >= date_debut)
+create table tarif (
+  id              uuid primary key default gen_random_uuid(),
+  type_operation  type_operation_tarif not null,
+  categorie_id    uuid references categorie(id),
+  montant         integer not null check (montant >= 0),
+  devise          char(3) not null default 'MGA',
+  actif           boolean not null default true,
+  date_debut      date,
+  date_fin        date,
+  created_at      timestamptz not null default now(),
+  updated_at      timestamptz not null default now(),
+  constraint tarif_dates_chk check (date_fin is null or date_debut is null or date_fin >= date_debut)
 );
 
-CREATE UNIQUE INDEX tarif_actif_unique
-  ON tarif (type_operation, COALESCE(categorie_id, '00000000-0000-0000-0000-000000000000'))
-  WHERE actif = TRUE;
+create unique index tarif_actif_unique
+  on tarif (type_operation, coalesce(categorie_id, '00000000-0000-0000-0000-000000000000'::uuid))
+  where actif = true;
 
-CREATE TABLE coordonnees_bancaires (
-  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  titulaire       TEXT NOT NULL,
-  banque          TEXT NOT NULL,
-  numero_compte   TEXT NOT NULL,
-  iban            TEXT,
-  swift           TEXT,
-  instructions    TEXT,
-  actif           BOOLEAN NOT NULL DEFAULT TRUE,
-  updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+create table documentation (
+  id          uuid primary key default gen_random_uuid(),
+  slug        text not null unique,
+  titre       text not null,
+  contenu     text not null,
+  ordre       integer not null default 0,
+  publie      boolean not null default true,
+  updated_at  timestamptz not null default now()
 );
 
-CREATE TABLE documentation (
-  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  slug        TEXT NOT NULL UNIQUE,
-  titre       TEXT NOT NULL,
-  contenu     TEXT NOT NULL,
-  ordre       INTEGER NOT NULL DEFAULT 0,
-  publie      BOOLEAN NOT NULL DEFAULT TRUE,
-  updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
--- ------------------------------------------------------------
+-- ============================================================
 -- Identités et comptes
--- ------------------------------------------------------------
+-- ============================================================
 
-CREATE TABLE utilisateur (
-  id                         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  email                      TEXT NOT NULL UNIQUE,
-  telephone                  TEXT,
-  mot_de_passe_hash          TEXT,
-  role                       role_utilisateur NOT NULL,
-  statut                     statut_utilisateur NOT NULL DEFAULT 'ACTIF',
-  doit_changer_mot_de_passe  BOOLEAN NOT NULL DEFAULT FALSE,
-  derniere_connexion_at      TIMESTAMPTZ,
-  created_at                 TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at                 TIMESTAMPTZ NOT NULL DEFAULT now()
+-- IMPORTANT : utilisateur.id est lié à auth.users.id => pas de default gen_random_uuid()
+create table utilisateur (
+  id                         uuid primary key,
+  email                      text not null unique,
+  telephone                  text,
+  role                       role_utilisateur not null,
+  statut                     statut_utilisateur not null default 'ACTIF',
+  doit_changer_mot_de_passe  boolean not null default false,
+  derniere_connexion_at      timestamptz,
+  created_at                 timestamptz not null default now(),
+  updated_at                 timestamptz not null default now()
 );
 
-CREATE INDEX utilisateur_role_idx ON utilisateur (role);
+create index utilisateur_role_idx on utilisateur (role);
 
-CREATE TABLE candidat (
-  id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  nom              TEXT NOT NULL,
-  prenom           TEXT NOT NULL,
-  cin              TEXT NOT NULL UNIQUE,
-  date_naissance   DATE NOT NULL,
-  telephone        TEXT NOT NULL,
-  email            TEXT NOT NULL,
-  adresse          TEXT NOT NULL,
-  utilisateur_id   UUID UNIQUE REFERENCES utilisateur(id),
-  created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
-  CONSTRAINT candidat_age_min_chk CHECK (date_naissance <= (CURRENT_DATE - INTERVAL '15 years'))
+create table candidat (
+  id               uuid primary key default gen_random_uuid(),
+  nom              text not null,
+  prenom           text not null,
+  cin              text not null unique,
+  date_naissance   date not null,
+  telephone        text not null,
+  email            text not null,
+  adresse          text not null,
+  utilisateur_id   uuid unique references utilisateur(id),
+  created_at       timestamptz not null default now(),
+  updated_at       timestamptz not null default now(),
+  constraint candidat_age_min_chk check (date_naissance <= (current_date - interval '15 years'))
 );
 
-CREATE TABLE membre (
-  id                 UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  utilisateur_id     UUID NOT NULL UNIQUE REFERENCES utilisateur(id),
-  candidat_id        UUID NOT NULL UNIQUE REFERENCES candidat(id),
-  numero_adherent    TEXT NOT NULL UNIQUE,
-  statut             statut_utilisateur NOT NULL DEFAULT 'ACTIF',
-  created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at         TIMESTAMPTZ NOT NULL DEFAULT now()
+create table membre (
+  id                 uuid primary key default gen_random_uuid(),
+  utilisateur_id     uuid not null unique references utilisateur(id),
+  candidat_id        uuid not null unique references candidat(id),
+  numero_adherent    text not null unique,
+  statut             statut_utilisateur not null default 'ACTIF',
+  created_at         timestamptz not null default now(),
+  updated_at         timestamptz not null default now()
 );
 
-CREATE TABLE membre_categorie (
-  id                   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  membre_id            UUID NOT NULL REFERENCES membre(id) ON DELETE CASCADE,
-  categorie_id         UUID NOT NULL REFERENCES categorie(id),
-  demande_adhesion_id  UUID,
-  statut               statut_adhesion_categorie NOT NULL DEFAULT 'ACTIVE',
-  date_activation      TIMESTAMPTZ NOT NULL DEFAULT now(),
-  UNIQUE (membre_id, categorie_id)
+create table membre_categorie (
+  id                   uuid primary key default gen_random_uuid(),
+  membre_id            uuid not null references membre(id) on delete cascade,
+  categorie_id         uuid not null references categorie(id),
+  demande_adhesion_id  uuid,
+  statut               statut_adhesion_categorie not null default 'ACTIVE',
+  date_activation      timestamptz not null default now(),
+  unique (membre_id, categorie_id)
 );
 
--- ------------------------------------------------------------
+-- ============================================================
 -- Demandes d'adhésion et pièces
--- ------------------------------------------------------------
+-- ============================================================
 
-CREATE TABLE demande_adhesion (
-  id                     UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  numero_dossier         TEXT NOT NULL UNIQUE,
-  jeton_suivi_hash       TEXT NOT NULL,
-  candidat_id            UUID NOT NULL REFERENCES candidat(id),
-  membre_id              UUID REFERENCES membre(id),
-  categorie_id           UUID NOT NULL REFERENCES categorie(id),
-  statut                 statut_demande NOT NULL DEFAULT 'BROUILLON',
-  motif_rejet            TEXT,
-  date_soumission        TIMESTAMPTZ,
-  date_decision          TIMESTAMPTZ,
-  agent_id               UUID REFERENCES utilisateur(id),
-  created_at             TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at             TIMESTAMPTZ NOT NULL DEFAULT now(),
-  CONSTRAINT demande_rejet_motif_chk CHECK (
-    statut <> 'REJETEE' OR motif_rejet IS NOT NULL
+create table demande_adhesion (
+  id                     uuid primary key default gen_random_uuid(),
+  numero_dossier         text not null unique,
+  jeton_suivi_hash       text not null,
+  candidat_id            uuid not null references candidat(id),
+  membre_id              uuid references membre(id),
+  categorie_id           uuid not null references categorie(id),
+  statut                 statut_demande not null default 'BROUILLON',
+  motif_rejet            text,
+  date_soumission        timestamptz,
+  date_decision          timestamptz,
+  agent_id               uuid references utilisateur(id),
+  created_at             timestamptz not null default now(),
+  updated_at             timestamptz not null default now(),
+  constraint demande_rejet_motif_chk check (
+    statut <> 'REJETEE' or motif_rejet is not null
   )
 );
 
-CREATE INDEX demande_statut_idx ON demande_adhesion (statut);
-CREATE INDEX demande_candidat_idx ON demande_adhesion (candidat_id);
-CREATE INDEX demande_membre_idx ON demande_adhesion (membre_id);
+create index demande_statut_idx on demande_adhesion (statut);
+create index demande_candidat_idx on demande_adhesion (candidat_id);
+create index demande_membre_idx on demande_adhesion (membre_id);
 
-ALTER TABLE membre_categorie
-  ADD CONSTRAINT membre_categorie_demande_fk
-  FOREIGN KEY (demande_adhesion_id) REFERENCES demande_adhesion(id);
+alter table membre_categorie
+  add constraint membre_categorie_demande_fk
+  foreign key (demande_adhesion_id) references demande_adhesion(id);
 
-CREATE TABLE piece (
-  id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  demande_adhesion_id   UUID NOT NULL REFERENCES demande_adhesion(id) ON DELETE CASCADE,
-  type                  type_piece NOT NULL,
-  chemin_stockage       TEXT NOT NULL,
-  mime_type             TEXT NOT NULL,
-  taille_octets         INTEGER NOT NULL CHECK (taille_octets > 0 AND taille_octets <= 20971520),
-  created_at            TIMESTAMPTZ NOT NULL DEFAULT now()
+create table piece (
+  id                    uuid primary key default gen_random_uuid(),
+  demande_adhesion_id   uuid not null references demande_adhesion(id) on delete cascade,
+  type                  type_piece not null,
+  chemin_stockage       text not null,
+  mime_type             text not null,
+  taille_octets         integer not null check (taille_octets > 0 and taille_octets <= 20971520),
+  created_at            timestamptz not null default now()
 );
 
-CREATE INDEX piece_demande_idx ON piece (demande_adhesion_id);
+create index piece_demande_idx on piece (demande_adhesion_id);
 
--- ------------------------------------------------------------
+-- ============================================================
 -- Œuvres et attestations
--- ------------------------------------------------------------
+-- ============================================================
 
-CREATE TABLE oeuvre (
-  id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  membre_id             UUID REFERENCES membre(id),
-  demande_adhesion_id   UUID REFERENCES demande_adhesion(id),
-  categorie_id          UUID NOT NULL REFERENCES categorie(id),
-  titre                 TEXT NOT NULL,
-  description           TEXT,
-  annee                 INTEGER,
-  statut                statut_oeuvre NOT NULL DEFAULT 'BROUILLON',
-  motif_rejet           TEXT,
-  chemin_fichier        TEXT,
-  mime_type             TEXT,
-  taille_octets         INTEGER CHECK (taille_octets IS NULL OR (taille_octets > 0 AND taille_octets <= 20971520)),
-  date_soumission       TIMESTAMPTZ,
-  date_decision         TIMESTAMPTZ,
-  agent_id              UUID REFERENCES utilisateur(id),
-  created_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
-  CONSTRAINT oeuvre_contexte_chk CHECK (
-    membre_id IS NOT NULL OR demande_adhesion_id IS NOT NULL
+create table oeuvre (
+  id                    uuid primary key default gen_random_uuid(),
+  membre_id             uuid references membre(id),
+  demande_adhesion_id   uuid references demande_adhesion(id),
+  categorie_id          uuid not null references categorie(id),
+  titre                 text not null,
+  description           text,
+  annee                 integer,
+  statut                statut_oeuvre not null default 'BROUILLON',
+  motif_rejet           text,
+  chemin_fichier        text,
+  mime_type             text,
+  taille_octets         integer check (taille_octets is null or (taille_octets > 0 and taille_octets <= 20971520)),
+  date_soumission       timestamptz,
+  date_decision         timestamptz,
+  agent_id              uuid references utilisateur(id),
+  created_at            timestamptz not null default now(),
+  updated_at            timestamptz not null default now(),
+  constraint oeuvre_contexte_chk check (
+    membre_id is not null or demande_adhesion_id is not null
   ),
-  CONSTRAINT oeuvre_rejet_motif_chk CHECK (
-    statut <> 'REJETEE' OR motif_rejet IS NOT NULL
+  constraint oeuvre_rejet_motif_chk check (
+    statut <> 'REJETEE' or motif_rejet is not null
   )
 );
 
-CREATE INDEX oeuvre_membre_idx ON oeuvre (membre_id);
-CREATE INDEX oeuvre_demande_idx ON oeuvre (demande_adhesion_id);
-CREATE INDEX oeuvre_statut_idx ON oeuvre (statut);
+create index oeuvre_membre_idx on oeuvre (membre_id);
+create index oeuvre_demande_idx on oeuvre (demande_adhesion_id);
+create index oeuvre_statut_idx on oeuvre (statut);
 
-CREATE TABLE attestation_diffusion (
-  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  oeuvre_id       UUID NOT NULL REFERENCES oeuvre(id) ON DELETE CASCADE,
-  chemin_stockage TEXT NOT NULL,
-  mime_type       TEXT NOT NULL,
-  taille_octets   INTEGER NOT NULL CHECK (taille_octets > 0 AND taille_octets <= 20971520),
-  created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+create table attestation_diffusion (
+  id              uuid primary key default gen_random_uuid(),
+  oeuvre_id       uuid not null references oeuvre(id) on delete cascade,
+  chemin_stockage text not null,
+  mime_type       text not null,
+  taille_octets   integer not null check (taille_octets > 0 and taille_octets <= 20971520),
+  created_at      timestamptz not null default now()
 );
 
--- ------------------------------------------------------------
+-- ============================================================
 -- Cotisations
--- ------------------------------------------------------------
+-- ============================================================
 
-CREATE TABLE cotisation (
-  id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  membre_id        UUID NOT NULL REFERENCES membre(id) ON DELETE CASCADE,
-  annee            INTEGER NOT NULL,
-  montant          INTEGER NOT NULL CHECK (montant >= 0),
-  statut           statut_cotisation NOT NULL DEFAULT 'NON_PAYEE',
-  date_paiement    TIMESTAMPTZ,
-  created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
-  UNIQUE (membre_id, annee)
+create table cotisation (
+  id               uuid primary key default gen_random_uuid(),
+  membre_id        uuid not null references membre(id) on delete cascade,
+  annee            integer not null,
+  montant          integer not null check (montant >= 0),
+  statut           statut_cotisation not null default 'NON_PAYEE',
+  date_paiement    timestamptz,
+  created_at       timestamptz not null default now(),
+  unique (membre_id, annee)
 );
 
--- ------------------------------------------------------------
--- Paiements
--- ------------------------------------------------------------
+-- ============================================================
+-- Paiements (MOBILE_MONEY + MVOLA uniquement)
+-- ============================================================
 
-CREATE TABLE paiement (
-  id                     UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  type                   type_paiement NOT NULL,
-  montant                INTEGER NOT NULL CHECK (montant >= 0),
-  devise                 CHAR(3) NOT NULL DEFAULT 'MGA',
-  mode                   mode_paiement NOT NULL,
-  operateur              operateur_paiement,
-  numero_telephone       TEXT,
-  reference_interne      TEXT NOT NULL UNIQUE,
-  reference_externe      TEXT UNIQUE,
-  statut                 statut_paiement NOT NULL DEFAULT 'INITIE',
-  motif_echec            TEXT,
-  demande_adhesion_id    UUID REFERENCES demande_adhesion(id),
-  oeuvre_id              UUID REFERENCES oeuvre(id),
-  cotisation_id          UUID REFERENCES cotisation(id),
-  candidat_id            UUID REFERENCES candidat(id),
-  membre_id              UUID REFERENCES membre(id),
-  date_initiation        TIMESTAMPTZ NOT NULL DEFAULT now(),
-  date_confirmation      TIMESTAMPTZ,
-  created_at             TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at             TIMESTAMPTZ NOT NULL DEFAULT now(),
-  CONSTRAINT paiement_contexte_chk CHECK (
-    (type = 'ADHESION'     AND demande_adhesion_id IS NOT NULL) OR
-    (type = 'DEPOT_OEUVRE' AND oeuvre_id IS NOT NULL) OR
-    (type = 'COTISATION'   AND cotisation_id IS NOT NULL)
+create table paiement (
+  id                     uuid primary key default gen_random_uuid(),
+  type                   type_paiement not null,
+  montant                integer not null check (montant >= 0),
+  devise                 char(3) not null default 'MGA',
+  mode                   mode_paiement not null default 'MOBILE_MONEY',
+  operateur              operateur_paiement not null default 'MVOLA',
+  numero_telephone       text not null,
+  reference_interne      text not null unique,
+  reference_externe      text unique,
+  statut                 statut_paiement not null default 'INITIE',
+  motif_echec            text,
+  demande_adhesion_id    uuid references demande_adhesion(id),
+  oeuvre_id              uuid references oeuvre(id),
+  cotisation_id          uuid references cotisation(id),
+  candidat_id            uuid references candidat(id),
+  membre_id              uuid references membre(id),
+  date_initiation        timestamptz not null default now(),
+  date_confirmation      timestamptz,
+  created_at             timestamptz not null default now(),
+  updated_at             timestamptz not null default now(),
+  constraint paiement_contexte_chk check (
+    (type = 'ADHESION'     and demande_adhesion_id is not null) or
+    (type = 'DEPOT_OEUVRE' and oeuvre_id is not null) or
+    (type = 'COTISATION'   and cotisation_id is not null)
   ),
-  CONSTRAINT paiement_mm_operateur_chk CHECK (
-    mode <> 'MOBILE_MONEY' OR operateur IS NOT NULL
-  )
+  -- Redondant (enum mono-valeur), mais explicite :
+  constraint paiement_mm_operateur_chk check (operateur = 'MVOLA'),
+  constraint paiement_mm_tel_chk check (numero_telephone <> '')
 );
 
-CREATE INDEX paiement_statut_idx ON paiement (statut);
-CREATE INDEX paiement_demande_idx ON paiement (demande_adhesion_id);
-CREATE INDEX paiement_oeuvre_idx ON paiement (oeuvre_id);
+create index paiement_statut_idx on paiement (statut);
+create index paiement_demande_idx on paiement (demande_adhesion_id);
+create index paiement_oeuvre_idx on paiement (oeuvre_id);
 
-CREATE UNIQUE INDEX paiement_adhesion_reussi_unique
-  ON paiement (demande_adhesion_id)
-  WHERE type = 'ADHESION' AND statut = 'REUSSI';
+create unique index paiement_adhesion_reussi_unique
+  on paiement (demande_adhesion_id)
+  where type = 'ADHESION' and statut = 'REUSSI';
 
-CREATE UNIQUE INDEX paiement_depot_reussi_unique
-  ON paiement (oeuvre_id)
-  WHERE type = 'DEPOT_OEUVRE' AND statut = 'REUSSI';
+create unique index paiement_depot_reussi_unique
+  on paiement (oeuvre_id)
+  where type = 'DEPOT_OEUVRE' and statut = 'REUSSI';
 
-CREATE UNIQUE INDEX paiement_cotisation_reussi_unique
-  ON paiement (cotisation_id)
-  WHERE type = 'COTISATION' AND statut = 'REUSSI';
+create unique index paiement_cotisation_reussi_unique
+  on paiement (cotisation_id)
+  where type = 'COTISATION' and statut = 'REUSSI';
 
-CREATE TABLE preuve_virement (
-  id                   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  paiement_id          UUID NOT NULL REFERENCES paiement(id) ON DELETE CASCADE,
-  chemin_stockage      TEXT NOT NULL,
-  mime_type            TEXT NOT NULL,
-  taille_octets        INTEGER NOT NULL CHECK (taille_octets > 0 AND taille_octets <= 20971520),
-  reference_fournie    TEXT,
-  date_upload          TIMESTAMPTZ NOT NULL DEFAULT now(),
-  agent_id             UUID REFERENCES utilisateur(id),
-  date_verification    TIMESTAMPTZ,
-  motif_rejet          TEXT
+create table journal_paiement (
+  id            uuid primary key default gen_random_uuid(),
+  paiement_id   uuid not null references paiement(id) on delete cascade,
+  evenement     text not null,
+  payload       jsonb,
+  created_at    timestamptz not null default now()
 );
 
-CREATE TABLE journal_paiement (
-  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  paiement_id   UUID NOT NULL REFERENCES paiement(id) ON DELETE CASCADE,
-  evenement     TEXT NOT NULL,
-  payload       JSONB,
-  created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
-);
+create index journal_paiement_idx on journal_paiement (paiement_id, created_at);
 
-CREATE INDEX journal_paiement_idx ON journal_paiement (paiement_id, created_at);
-
--- ------------------------------------------------------------
+-- ============================================================
 -- Notifications et sécurité
--- ------------------------------------------------------------
+-- ============================================================
 
-CREATE TABLE notification (
-  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  utilisateur_id UUID REFERENCES utilisateur(id) ON DELETE CASCADE,
-  candidat_id   UUID REFERENCES candidat(id) ON DELETE CASCADE,
-  type          type_notification NOT NULL,
-  titre         TEXT NOT NULL,
-  message       TEXT NOT NULL,
-  lue           BOOLEAN NOT NULL DEFAULT FALSE,
-  globale       BOOLEAN NOT NULL DEFAULT FALSE,
-  metadata      JSONB,
-  date_envoi    TIMESTAMPTZ NOT NULL DEFAULT now(),
-  CONSTRAINT notification_destinataire_chk CHECK (
-    globale = TRUE OR utilisateur_id IS NOT NULL OR candidat_id IS NOT NULL
+create table notification (
+  id             uuid primary key default gen_random_uuid(),
+  utilisateur_id uuid references utilisateur(id) on delete cascade,
+  candidat_id    uuid references candidat(id) on delete cascade,
+  type           type_notification not null,
+  titre          text not null,
+  message        text not null,
+  lue            boolean not null default false,
+  globale        boolean not null default false,
+  metadata       jsonb,
+  date_envoi     timestamptz not null default now(),
+  constraint notification_destinataire_chk check (
+    globale = true or utilisateur_id is not null or candidat_id is not null
   )
 );
 
-CREATE INDEX notification_user_idx ON notification (utilisateur_id, lue, date_envoi DESC);
+create index notification_user_idx on notification (utilisateur_id, lue, date_envoi desc);
 
-CREATE TABLE jeton_reinitialisation (
-  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  utilisateur_id  UUID NOT NULL REFERENCES utilisateur(id) ON DELETE CASCADE,
-  jeton_hash      TEXT NOT NULL UNIQUE,
-  expire_at       TIMESTAMPTZ NOT NULL,
-  utilise_at      TIMESTAMPTZ,
-  created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+create table jeton_reinitialisation (
+  id              uuid primary key default gen_random_uuid(),
+  utilisateur_id  uuid not null references utilisateur(id) on delete cascade,
+  jeton_hash      text not null unique,
+  expire_at       timestamptz not null,
+  utilise_at      timestamptz,
+  created_at      timestamptz not null default now()
 );
 
--- Création des buckets de stockage privés
-INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
-VALUES 
-  ('pieces', 'pieces', FALSE, 20971520, ARRAY['image/jpeg', 'image/png', 'application/pdf']),
-  ('oeuvres', 'oeuvres', FALSE, 20971520, ARRAY['audio/mpeg', 'audio/wav', 'application/pdf', 'image/jpeg', 'image/png']),
-  ('preuves', 'preuves', FALSE, 20971520, ARRAY['image/jpeg', 'image/png', 'application/pdf'])
-ON CONFLICT (id) DO NOTHING;
-
--- Politiques pour le bucket 'pieces'
-CREATE POLICY "Autoriser upload pieces"
-ON storage.objects FOR INSERT
-TO public
-WITH CHECK (bucket_id = 'pieces');
-
-CREATE POLICY "Autoriser lecture pieces"
-ON storage.objects FOR SELECT
-TO public
-USING (bucket_id = 'pieces');
-
--- Politiques pour le bucket 'oeuvres'
-CREATE POLICY "Autoriser upload oeuvres"
-ON storage.objects FOR INSERT
-TO public
-WITH CHECK (bucket_id = 'oeuvres');
-
-CREATE POLICY "Autoriser lecture oeuvres"
-ON storage.objects FOR SELECT
-TO public
-USING (bucket_id = 'oeuvres');
-
--- Politiques pour le bucket 'preuves'
-CREATE POLICY "Autoriser upload preuves"
-ON storage.objects FOR INSERT
-TO public
-WITH CHECK (bucket_id = 'preuves');
-
-CREATE POLICY "Autoriser lecture preuves"
-ON storage.objects FOR SELECT
-TO public
-USING (bucket_id = 'preuves');
-
-
-
-
 -- ============================================================
--- OMDA — SCRIPT COMPLET DE SÉCURITÉ ET POLITIQUES RLS
+-- Storage buckets (SANS bucket preuves)
 -- ============================================================
 
--- ------------------------------------------------------------
--- 0. Fonctions utilitaires de vérification des rôles
--- ------------------------------------------------------------
-CREATE OR REPLACE FUNCTION public.get_user_role()
-RETURNS role_utilisateur AS $$
-  SELECT role FROM public.utilisateur WHERE id = auth.uid();
-$$ LANGUAGE sql SECURITY DEFINER STABLE;
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values
+  ('pieces',  'pieces',  false, 20971520, array['image/jpeg', 'image/png', 'application/pdf']),
+  ('oeuvres', 'oeuvres', false, 20971520, array['audio/mpeg', 'audio/wav', 'application/pdf', 'image/jpeg', 'image/png'])
+on conflict (id) do nothing;
 
-CREATE OR REPLACE FUNCTION public.is_admin()
-RETURNS BOOLEAN AS $$
-  SELECT COALESCE((public.get_user_role() = 'ADMINISTRATEUR'), FALSE);
-$$ LANGUAGE sql SECURITY DEFINER STABLE;
+-- Policies storage (pièces)
+drop policy if exists "Autoriser upload pieces" on storage.objects;
+create policy "Autoriser upload pieces"
+on storage.objects for insert
+to public
+with check (bucket_id = 'pieces');
 
-CREATE OR REPLACE FUNCTION public.is_agent_or_admin()
-RETURNS BOOLEAN AS $$
-  SELECT COALESCE((public.get_user_role() IN ('AGENT', 'ADMINISTRATEUR')), FALSE);
-$$ LANGUAGE sql SECURITY DEFINER STABLE;
+drop policy if exists "Autoriser lecture pieces" on storage.objects;
+create policy "Autoriser lecture pieces"
+on storage.objects for select
+to public
+using (bucket_id = 'pieces');
 
--- ------------------------------------------------------------
--- 1. Activation du RLS sur l'ensemble des tables
--- ------------------------------------------------------------
-ALTER TABLE public.categorie ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.tarif ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.coordonnees_bancaires ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.documentation ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.utilisateur ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.candidat ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.membre ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.membre_categorie ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.demande_adhesion ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.piece ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.oeuvre ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.attestation_diffusion ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.cotisation ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.paiement ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.preuve_virement ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.journal_paiement ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.notification ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.jeton_reinitialisation ENABLE ROW LEVEL SECURITY;
+-- Policies storage (oeuvres)
+drop policy if exists "Autoriser upload oeuvres" on storage.objects;
+create policy "Autoriser upload oeuvres"
+on storage.objects for insert
+to public
+with check (bucket_id = 'oeuvres');
 
--- ------------------------------------------------------------
--- 2. Tables Référentiels (Lecture publique / Modification Admin)
--- ------------------------------------------------------------
+drop policy if exists "Autoriser lecture oeuvres" on storage.objects;
+create policy "Autoriser lecture oeuvres"
+on storage.objects for select
+to public
+using (bucket_id = 'oeuvres');
 
--- CATEGORIE
-DROP POLICY IF EXISTS "categorie_select_all" ON public.categorie;
-CREATE POLICY "categorie_select_all" ON public.categorie
-  FOR SELECT TO public USING (TRUE);
+-- ============================================================
+-- RLS : fonctions utilitaires
+-- ============================================================
 
-DROP POLICY IF EXISTS "categorie_admin_all" ON public.categorie;
-CREATE POLICY "categorie_admin_all" ON public.categorie
-  FOR ALL TO authenticated USING (public.is_admin()) WITH CHECK (public.is_admin());
+create or replace function public.get_user_role()
+returns role_utilisateur as $$
+  select role from public.utilisateur where id = auth.uid();
+$$ language sql security definer stable;
 
--- TARIF
-DROP POLICY IF EXISTS "tarif_select_all" ON public.tarif;
-CREATE POLICY "tarif_select_all" ON public.tarif
-  FOR SELECT TO public USING (TRUE);
+create or replace function public.is_admin()
+returns boolean as $$
+  select coalesce((public.get_user_role() = 'ADMINISTRATEUR'), false);
+$$ language sql security definer stable;
 
-DROP POLICY IF EXISTS "tarif_admin_all" ON public.tarif;
-CREATE POLICY "tarif_admin_all" ON public.tarif
-  FOR ALL TO authenticated USING (public.is_admin()) WITH CHECK (public.is_admin());
+create or replace function public.is_agent_or_admin()
+returns boolean as $$
+  select coalesce((public.get_user_role() in ('AGENT', 'ADMINISTRATEUR')), false);
+$$ language sql security definer stable;
 
--- COORDONNEES BANCAIRES
-DROP POLICY IF EXISTS "coordonnees_select_all" ON public.coordonnees_bancaires;
-CREATE POLICY "coordonnees_select_all" ON public.coordonnees_bancaires
-  FOR SELECT TO public USING (TRUE);
+-- ============================================================
+-- Activer RLS sur toutes les tables (sans virement)
+-- ============================================================
 
-DROP POLICY IF EXISTS "coordonnees_admin_all" ON public.coordonnees_bancaires;
-CREATE POLICY "coordonnees_admin_all" ON public.coordonnees_bancaires
-  FOR ALL TO authenticated USING (public.is_admin()) WITH CHECK (public.is_admin());
+alter table public.categorie enable row level security;
+alter table public.tarif enable row level security;
+alter table public.documentation enable row level security;
 
--- DOCUMENTATION
-DROP POLICY IF EXISTS "documentation_select_public" ON public.documentation;
-CREATE POLICY "documentation_select_public" ON public.documentation
-  FOR SELECT TO public USING (publie = TRUE OR public.is_agent_or_admin());
+alter table public.utilisateur enable row level security;
+alter table public.candidat enable row level security;
+alter table public.membre enable row level security;
+alter table public.membre_categorie enable row level security;
 
-DROP POLICY IF EXISTS "documentation_admin_all" ON public.documentation;
-CREATE POLICY "documentation_admin_all" ON public.documentation
-  FOR ALL TO authenticated USING (public.is_admin()) WITH CHECK (public.is_admin());
+alter table public.demande_adhesion enable row level security;
+alter table public.piece enable row level security;
 
--- ------------------------------------------------------------
--- 3. Identités et comptes
--- ------------------------------------------------------------
+alter table public.oeuvre enable row level security;
+alter table public.attestation_diffusion enable row level security;
+
+alter table public.cotisation enable row level security;
+alter table public.paiement enable row level security;
+alter table public.journal_paiement enable row level security;
+
+alter table public.notification enable row level security;
+alter table public.jeton_reinitialisation enable row level security;
+
+-- ============================================================
+-- Policies RLS — Référentiels
+-- ============================================================
+
+-- CATEGORIE (lecture publique)
+drop policy if exists "categorie_select_all" on public.categorie;
+create policy "categorie_select_all" on public.categorie
+  for select to public using (true);
+
+drop policy if exists "categorie_admin_all" on public.categorie;
+create policy "categorie_admin_all" on public.categorie
+  for all to authenticated using (public.is_admin()) with check (public.is_admin());
+
+-- TARIF (lecture publique)
+drop policy if exists "tarif_select_all" on public.tarif;
+create policy "tarif_select_all" on public.tarif
+  for select to public using (true);
+
+drop policy if exists "tarif_admin_all" on public.tarif;
+create policy "tarif_admin_all" on public.tarif
+  for all to authenticated using (public.is_admin()) with check (public.is_admin());
+
+-- DOCUMENTATION (publique si publie=true)
+drop policy if exists "documentation_select_public" on public.documentation;
+create policy "documentation_select_public" on public.documentation
+  for select to public using (publie = true or public.is_agent_or_admin());
+
+drop policy if exists "documentation_admin_all" on public.documentation;
+create policy "documentation_admin_all" on public.documentation
+  for all to authenticated using (public.is_admin()) with check (public.is_admin());
+
+-- ============================================================
+-- Policies RLS — Identités et comptes
+-- ============================================================
 
 -- UTILISATEUR
-DROP POLICY IF EXISTS "utilisateur_select_self_or_staff" ON public.utilisateur;
-CREATE POLICY "utilisateur_select_self_or_staff" ON public.utilisateur
-  FOR SELECT TO authenticated USING (id = auth.uid() OR public.is_agent_or_admin());
+drop policy if exists "utilisateur_select_self_or_staff" on public.utilisateur;
+create policy "utilisateur_select_self_or_staff" on public.utilisateur
+  for select to authenticated using (id = auth.uid() or public.is_agent_or_admin());
 
-DROP POLICY IF EXISTS "utilisateur_update_self_or_admin" ON public.utilisateur;
-CREATE POLICY "utilisateur_update_self_or_admin" ON public.utilisateur
-  FOR UPDATE TO authenticated USING (id = auth.uid() OR public.is_admin()) WITH CHECK (id = auth.uid() OR public.is_admin());
+drop policy if exists "utilisateur_update_self_or_admin" on public.utilisateur;
+create policy "utilisateur_update_self_or_admin" on public.utilisateur
+  for update to authenticated
+  using (id = auth.uid() or public.is_admin())
+  with check (id = auth.uid() or public.is_admin());
 
 -- CANDIDAT
-DROP POLICY IF EXISTS "candidat_select_self_or_staff" ON public.candidat;
-CREATE POLICY "candidat_select_self_or_staff" ON public.candidat
-  FOR SELECT TO authenticated USING (utilisateur_id = auth.uid() OR public.is_agent_or_admin());
+drop policy if exists "candidat_select_self_or_staff" on public.candidat;
+create policy "candidat_select_self_or_staff" on public.candidat
+  for select to authenticated using (utilisateur_id = auth.uid() or public.is_agent_or_admin());
 
-DROP POLICY IF EXISTS "candidat_insert_self_or_staff" ON public.candidat;
-CREATE POLICY "candidat_insert_self_or_staff" ON public.candidat
-  FOR INSERT TO authenticated WITH CHECK (utilisateur_id = auth.uid() OR public.is_agent_or_admin());
+drop policy if exists "candidat_insert_self_or_staff" on public.candidat;
+create policy "candidat_insert_self_or_staff" on public.candidat
+  for insert to authenticated with check (utilisateur_id = auth.uid() or public.is_agent_or_admin());
 
-DROP POLICY IF EXISTS "candidat_update_self_or_staff" ON public.candidat;
-CREATE POLICY "candidat_update_self_or_staff" ON public.candidat
-  FOR UPDATE TO authenticated USING (utilisateur_id = auth.uid() OR public.is_agent_or_admin());
+drop policy if exists "candidat_update_self_or_staff" on public.candidat;
+create policy "candidat_update_self_or_staff" on public.candidat
+  for update to authenticated using (utilisateur_id = auth.uid() or public.is_agent_or_admin());
 
 -- MEMBRE
-DROP POLICY IF EXISTS "membre_select_self_or_staff" ON public.membre;
-CREATE POLICY "membre_select_self_or_staff" ON public.membre
-  FOR SELECT TO authenticated USING (utilisateur_id = auth.uid() OR public.is_agent_or_admin());
+drop policy if exists "membre_select_self_or_staff" on public.membre;
+create policy "membre_select_self_or_staff" on public.membre
+  for select to authenticated using (utilisateur_id = auth.uid() or public.is_agent_or_admin());
 
-DROP POLICY IF EXISTS "membre_staff_manage" ON public.membre;
-CREATE POLICY "membre_staff_manage" ON public.membre
-  FOR ALL TO authenticated USING (public.is_agent_or_admin()) WITH CHECK (public.is_agent_or_admin());
+drop policy if exists "membre_staff_manage" on public.membre;
+create policy "membre_staff_manage" on public.membre
+  for all to authenticated using (public.is_agent_or_admin()) with check (public.is_agent_or_admin());
 
 -- MEMBRE_CATEGORIE
-DROP POLICY IF EXISTS "membre_categorie_select" ON public.membre_categorie;
-CREATE POLICY "membre_categorie_select" ON public.membre_categorie
-  FOR SELECT TO authenticated USING (
-    membre_id IN (SELECT id FROM public.membre WHERE utilisateur_id = auth.uid()) 
-    OR public.is_agent_or_admin()
+drop policy if exists "membre_categorie_select" on public.membre_categorie;
+create policy "membre_categorie_select" on public.membre_categorie
+  for select to authenticated using (
+    membre_id in (select id from public.membre where utilisateur_id = auth.uid())
+    or public.is_agent_or_admin()
   );
 
-DROP POLICY IF EXISTS "membre_categorie_staff_all" ON public.membre_categorie;
-CREATE POLICY "membre_categorie_staff_all" ON public.membre_categorie
-  FOR ALL TO authenticated USING (public.is_agent_or_admin()) WITH CHECK (public.is_agent_or_admin());
+drop policy if exists "membre_categorie_staff_all" on public.membre_categorie;
+create policy "membre_categorie_staff_all" on public.membre_categorie
+  for all to authenticated using (public.is_agent_or_admin()) with check (public.is_agent_or_admin());
 
--- ------------------------------------------------------------
--- 4. Demandes d'adhésion et pièces
--- ------------------------------------------------------------
+-- ============================================================
+-- Policies RLS — Demandes + pièces
+-- ============================================================
 
 -- DEMANDE_ADHESION
-DROP POLICY IF EXISTS "demande_select_owner_or_staff" ON public.demande_adhesion;
-CREATE POLICY "demande_select_owner_or_staff" ON public.demande_adhesion
-  FOR SELECT TO authenticated USING (
-    candidat_id IN (SELECT id FROM public.candidat WHERE utilisateur_id = auth.uid())
-    OR membre_id IN (SELECT id FROM public.membre WHERE utilisateur_id = auth.uid())
-    OR public.is_agent_or_admin()
+drop policy if exists "demande_select_owner_or_staff" on public.demande_adhesion;
+create policy "demande_select_owner_or_staff" on public.demande_adhesion
+  for select to authenticated using (
+    candidat_id in (select id from public.candidat where utilisateur_id = auth.uid())
+    or membre_id in (select id from public.membre where utilisateur_id = auth.uid())
+    or public.is_agent_or_admin()
   );
 
-DROP POLICY IF EXISTS "demande_insert_owner_or_staff" ON public.demande_adhesion;
-CREATE POLICY "demande_insert_owner_or_staff" ON public.demande_adhesion
-  FOR INSERT TO authenticated WITH CHECK (
-    candidat_id IN (SELECT id FROM public.candidat WHERE utilisateur_id = auth.uid())
-    OR public.is_agent_or_admin()
+drop policy if exists "demande_insert_owner_or_staff" on public.demande_adhesion;
+create policy "demande_insert_owner_or_staff" on public.demande_adhesion
+  for insert to authenticated with check (
+    candidat_id in (select id from public.candidat where utilisateur_id = auth.uid())
+    or public.is_agent_or_admin()
   );
 
-DROP POLICY IF EXISTS "demande_update_owner_or_staff" ON public.demande_adhesion;
-CREATE POLICY "demande_update_owner_or_staff" ON public.demande_adhesion
-  FOR UPDATE TO authenticated USING (
-    (candidat_id IN (SELECT id FROM public.candidat WHERE utilisateur_id = auth.uid()) AND statut = 'BROUILLON')
-    OR public.is_agent_or_admin()
+drop policy if exists "demande_update_owner_or_staff" on public.demande_adhesion;
+create policy "demande_update_owner_or_staff" on public.demande_adhesion
+  for update to authenticated using (
+    (candidat_id in (select id from public.candidat where utilisateur_id = auth.uid()) and statut = 'BROUILLON')
+    or public.is_agent_or_admin()
   );
 
 -- PIECE
-DROP POLICY IF EXISTS "piece_select_owner_or_staff" ON public.piece;
-CREATE POLICY "piece_select_owner_or_staff" ON public.piece
-  FOR SELECT TO authenticated USING (
-    demande_adhesion_id IN (
-      SELECT id FROM public.demande_adhesion 
-      WHERE candidat_id IN (SELECT id FROM public.candidat WHERE utilisateur_id = auth.uid())
+drop policy if exists "piece_select_owner_or_staff" on public.piece;
+create policy "piece_select_owner_or_staff" on public.piece
+  for select to authenticated using (
+    demande_adhesion_id in (
+      select id from public.demande_adhesion
+      where candidat_id in (select id from public.candidat where utilisateur_id = auth.uid())
     )
-    OR public.is_agent_or_admin()
+    or public.is_agent_or_admin()
   );
 
-DROP POLICY IF EXISTS "piece_insert_owner_or_staff" ON public.piece;
-CREATE POLICY "piece_insert_owner_or_staff" ON public.piece
-  FOR INSERT TO authenticated WITH CHECK (
-    demande_adhesion_id IN (
-      SELECT id FROM public.demande_adhesion 
-      WHERE candidat_id IN (SELECT id FROM public.candidat WHERE utilisateur_id = auth.uid())
+drop policy if exists "piece_insert_owner_or_staff" on public.piece;
+create policy "piece_insert_owner_or_staff" on public.piece
+  for insert to authenticated with check (
+    demande_adhesion_id in (
+      select id from public.demande_adhesion
+      where candidat_id in (select id from public.candidat where utilisateur_id = auth.uid())
     )
-    OR public.is_agent_or_admin()
+    or public.is_agent_or_admin()
   );
 
--- ------------------------------------------------------------
--- 5. Œuvres et attestations
--- ------------------------------------------------------------
+-- ============================================================
+-- Policies RLS — Œuvres + attestations
+-- ============================================================
 
 -- OEUVRE
-DROP POLICY IF EXISTS "oeuvre_select_owner_or_staff" ON public.oeuvre;
-CREATE POLICY "oeuvre_select_owner_or_staff" ON public.oeuvre
-  FOR SELECT TO authenticated USING (
-    membre_id IN (SELECT id FROM public.membre WHERE utilisateur_id = auth.uid())
-    OR demande_adhesion_id IN (
-      SELECT id FROM public.demande_adhesion 
-      WHERE candidat_id IN (SELECT id FROM public.candidat WHERE utilisateur_id = auth.uid())
+drop policy if exists "oeuvre_select_owner_or_staff" on public.oeuvre;
+create policy "oeuvre_select_owner_or_staff" on public.oeuvre
+  for select to authenticated using (
+    membre_id in (select id from public.membre where utilisateur_id = auth.uid())
+    or demande_adhesion_id in (
+      select id from public.demande_adhesion
+      where candidat_id in (select id from public.candidat where utilisateur_id = auth.uid())
     )
-    OR public.is_agent_or_admin()
+    or public.is_agent_or_admin()
   );
 
-DROP POLICY IF EXISTS "oeuvre_insert_owner_or_staff" ON public.oeuvre;
-CREATE POLICY "oeuvre_insert_owner_or_staff" ON public.oeuvre
-  FOR INSERT TO authenticated WITH CHECK (
-    membre_id IN (SELECT id FROM public.membre WHERE utilisateur_id = auth.uid())
-    OR demande_adhesion_id IN (
-      SELECT id FROM public.demande_adhesion 
-      WHERE candidat_id IN (SELECT id FROM public.candidat WHERE utilisateur_id = auth.uid())
+drop policy if exists "oeuvre_insert_owner_or_staff" on public.oeuvre;
+create policy "oeuvre_insert_owner_or_staff" on public.oeuvre
+  for insert to authenticated with check (
+    membre_id in (select id from public.membre where utilisateur_id = auth.uid())
+    or demande_adhesion_id in (
+      select id from public.demande_adhesion
+      where candidat_id in (select id from public.candidat where utilisateur_id = auth.uid())
     )
-    OR public.is_agent_or_admin()
+    or public.is_agent_or_admin()
   );
 
-DROP POLICY IF EXISTS "oeuvre_update_staff" ON public.oeuvre;
-CREATE POLICY "oeuvre_update_staff" ON public.oeuvre
-  FOR UPDATE TO authenticated USING (public.is_agent_or_admin());
+drop policy if exists "oeuvre_update_staff" on public.oeuvre;
+create policy "oeuvre_update_staff" on public.oeuvre
+  for update to authenticated using (public.is_agent_or_admin());
 
 -- ATTESTATION_DIFFUSION
-DROP POLICY IF EXISTS "attestation_select_owner_or_staff" ON public.attestation_diffusion;
-CREATE POLICY "attestation_select_owner_or_staff" ON public.attestation_diffusion
-  FOR SELECT TO authenticated USING (
-    oeuvre_id IN (
-      SELECT id FROM public.oeuvre 
-      WHERE membre_id IN (SELECT id FROM public.membre WHERE utilisateur_id = auth.uid())
+drop policy if exists "attestation_select_owner_or_staff" on public.attestation_diffusion;
+create policy "attestation_select_owner_or_staff" on public.attestation_diffusion
+  for select to authenticated using (
+    oeuvre_id in (
+      select id from public.oeuvre
+      where membre_id in (select id from public.membre where utilisateur_id = auth.uid())
     )
-    OR public.is_agent_or_admin()
+    or public.is_agent_or_admin()
   );
 
--- ------------------------------------------------------------
--- 6. Cotisations
--- ------------------------------------------------------------
+-- ============================================================
+-- Policies RLS — Cotisations
+-- ============================================================
 
--- COTISATION
-DROP POLICY IF EXISTS "cotisation_select_owner_or_staff" ON public.cotisation;
-CREATE POLICY "cotisation_select_owner_or_staff" ON public.cotisation
-  FOR SELECT TO authenticated USING (
-    membre_id IN (SELECT id FROM public.membre WHERE utilisateur_id = auth.uid())
-    OR public.is_agent_or_admin()
+drop policy if exists "cotisation_select_owner_or_staff" on public.cotisation;
+create policy "cotisation_select_owner_or_staff" on public.cotisation
+  for select to authenticated using (
+    membre_id in (select id from public.membre where utilisateur_id = auth.uid())
+    or public.is_agent_or_admin()
   );
 
-DROP POLICY IF EXISTS "cotisation_staff_manage" ON public.cotisation;
-CREATE POLICY "cotisation_staff_manage" ON public.cotisation
-  FOR ALL TO authenticated USING (public.is_agent_or_admin()) WITH CHECK (public.is_agent_or_admin());
+drop policy if exists "cotisation_staff_manage" on public.cotisation;
+create policy "cotisation_staff_manage" on public.cotisation
+  for all to authenticated using (public.is_agent_or_admin()) with check (public.is_agent_or_admin());
 
--- ------------------------------------------------------------
--- 7. Paiements et preuves
--- ------------------------------------------------------------
+-- ============================================================
+-- Policies RLS — Paiements
+-- ============================================================
 
--- PAIEMENT
-DROP POLICY IF EXISTS "paiement_select_owner_or_staff" ON public.paiement;
-CREATE POLICY "paiement_select_owner_or_staff" ON public.paiement
-  FOR SELECT TO authenticated USING (
-    candidat_id IN (SELECT id FROM public.candidat WHERE utilisateur_id = auth.uid())
-    OR membre_id IN (SELECT id FROM public.membre WHERE utilisateur_id = auth.uid())
-    OR public.is_agent_or_admin()
+drop policy if exists "paiement_select_owner_or_staff" on public.paiement;
+create policy "paiement_select_owner_or_staff" on public.paiement
+  for select to authenticated using (
+    candidat_id in (select id from public.candidat where utilisateur_id = auth.uid())
+    or membre_id in (select id from public.membre where utilisateur_id = auth.uid())
+    or public.is_agent_or_admin()
   );
 
-DROP POLICY IF EXISTS "paiement_insert_owner_or_staff" ON public.paiement;
-CREATE POLICY "paiement_insert_owner_or_staff" ON public.paiement
-  FOR INSERT TO authenticated WITH CHECK (
-    candidat_id IN (SELECT id FROM public.candidat WHERE utilisateur_id = auth.uid())
-    OR membre_id IN (SELECT id FROM public.membre WHERE utilisateur_id = auth.uid())
-    OR public.is_agent_or_admin()
+drop policy if exists "paiement_insert_owner_or_staff" on public.paiement;
+create policy "paiement_insert_owner_or_staff" on public.paiement
+  for insert to authenticated with check (
+    candidat_id in (select id from public.candidat where utilisateur_id = auth.uid())
+    or membre_id in (select id from public.membre where utilisateur_id = auth.uid())
+    or public.is_agent_or_admin()
   );
 
-DROP POLICY IF EXISTS "paiement_staff_update" ON public.paiement;
-CREATE POLICY "paiement_staff_update" ON public.paiement
-  FOR UPDATE TO authenticated USING (public.is_agent_or_admin());
+drop policy if exists "paiement_staff_update" on public.paiement;
+create policy "paiement_staff_update" on public.paiement
+  for update to authenticated using (public.is_agent_or_admin());
 
--- PREUVE_VIREMENT
-DROP POLICY IF EXISTS "preuve_select_owner_or_staff" ON public.preuve_virement;
-CREATE POLICY "preuve_select_owner_or_staff" ON public.preuve_virement
-  FOR SELECT TO authenticated USING (
-    paiement_id IN (
-      SELECT id FROM public.paiement 
-      WHERE candidat_id IN (SELECT id FROM public.candidat WHERE utilisateur_id = auth.uid())
-         OR membre_id IN (SELECT id FROM public.membre WHERE utilisateur_id = auth.uid())
-    )
-    OR public.is_agent_or_admin()
+-- JOURNAL_PAIEMENT (staff only)
+drop policy if exists "journal_staff_only" on public.journal_paiement;
+create policy "journal_staff_only" on public.journal_paiement
+  for all to authenticated using (public.is_agent_or_admin());
+
+-- ============================================================
+-- Policies RLS — Notifications
+-- ============================================================
+
+drop policy if exists "notification_select_owner" on public.notification;
+create policy "notification_select_owner" on public.notification
+  for select to authenticated using (
+    globale = true
+    or utilisateur_id = auth.uid()
+    or candidat_id in (select id from public.candidat where utilisateur_id = auth.uid())
+    or public.is_agent_or_admin()
   );
 
-DROP POLICY IF EXISTS "preuve_insert_owner_or_staff" ON public.preuve_virement;
-CREATE POLICY "preuve_insert_owner_or_staff" ON public.preuve_virement
-  FOR INSERT TO authenticated WITH CHECK (
-    paiement_id IN (
-      SELECT id FROM public.paiement 
-      WHERE candidat_id IN (SELECT id FROM public.candidat WHERE utilisateur_id = auth.uid())
-         OR membre_id IN (SELECT id FROM public.membre WHERE utilisateur_id = auth.uid())
-    )
-    OR public.is_agent_or_admin()
-  );
+drop policy if exists "notification_update_owner" on public.notification;
+create policy "notification_update_owner" on public.notification
+  for update to authenticated using (utilisateur_id = auth.uid()) with check (utilisateur_id = auth.uid());
 
--- JOURNAL_PAIEMENT
-DROP POLICY IF EXISTS "journal_staff_only" ON public.journal_paiement;
-CREATE POLICY "journal_staff_only" ON public.journal_paiement
-  FOR ALL TO authenticated USING (public.is_agent_or_admin());
+-- JETON_REINITIALISATION (self only)
+drop policy if exists "jeton_self_only" on public.jeton_reinitialisation;
+create policy "jeton_self_only" on public.jeton_reinitialisation
+  for all to authenticated using (utilisateur_id = auth.uid());
 
--- ------------------------------------------------------------
--- 8. Notifications et sécurité
--- ------------------------------------------------------------
+-- ============================================================
+-- Lier utilisateur à Supabase Auth + trigger sync
+-- ============================================================
 
--- NOTIFICATION
-DROP POLICY IF EXISTS "notification_select_owner" ON public.notification;
-CREATE POLICY "notification_select_owner" ON public.notification
-  FOR SELECT TO authenticated USING (
-    globale = TRUE
-    OR utilisateur_id = auth.uid()
-    OR candidat_id IN (SELECT id FROM public.candidat WHERE utilisateur_id = auth.uid())
-    OR public.is_agent_or_admin()
-  );
+-- Lien FK vers auth.users (Supabase)
+alter table public.utilisateur
+  add constraint utilisateur_id_fkey foreign key (id) references auth.users(id) on delete cascade;
 
-DROP POLICY IF EXISTS "notification_update_owner" ON public.notification;
-CREATE POLICY "notification_update_owner" ON public.notification
-  FOR UPDATE TO authenticated USING (utilisateur_id = auth.uid()) WITH CHECK (utilisateur_id = auth.uid());
-
--- JETON_REINITIALISATION
-DROP POLICY IF EXISTS "jeton_self_only" ON public.jeton_reinitialisation;
-CREATE POLICY "jeton_self_only" ON public.jeton_reinitialisation
-  FOR ALL TO authenticated USING (utilisateur_id = auth.uid());
-
-
-
-
-
-
--- 1. Lier la table utilisateur à Supabase Auth
-ALTER TABLE public.utilisateur
-  DROP COLUMN IF EXISTS mot_de_passe_hash,
-  ADD CONSTRAINT utilisateur_id_fkey FOREIGN KEY (id) REFERENCES auth.users(id) ON DELETE CASCADE;
-
--- 2. Créer la fonction de synchronisation automatique
-CREATE OR REPLACE FUNCTION public.handle_new_user()
-RETURNS TRIGGER AS $$
-BEGIN
-  INSERT INTO public.utilisateur (id, email, role, statut)
-  VALUES (
-    NEW.id,
-    NEW.email,
-    COALESCE((NEW.raw_user_meta_data->>'role')::role_utilisateur, 'MEMBRE'),
+-- Fonction de synchronisation automatique lors de la création d'un user Auth
+create or replace function public.handle_new_user()
+returns trigger as $$
+begin
+  insert into public.utilisateur (id, email, role, statut)
+  values (
+    new.id,
+    new.email,
+    coalesce((new.raw_user_meta_data->>'role')::role_utilisateur, 'MEMBRE'),
     'ACTIF'
   );
-  RETURN NEW;
-END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+  return new;
+end;
+$$ language plpgsql security definer;
 
--- 3. Attacher le déclencheur sur les inscriptions Supabase Auth
-CREATE OR REPLACE TRIGGER on_auth_user_created
-  AFTER INSERT ON auth.users
-  FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
-
-
-
-
-
-
-CREATE TABLE IF NOT EXISTS public.operateur_mobile_money (
-  code        operateur_paiement PRIMARY KEY,
-  libelle     TEXT NOT NULL,
-  actif       BOOLEAN NOT NULL DEFAULT TRUE,
-  ordre       INTEGER NOT NULL DEFAULT 0,
-  updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
-INSERT INTO public.operateur_mobile_money (code, libelle, actif, ordre)
-VALUES
-  ('MVOLA',        'MVola',        TRUE, 1),
-  ('ORANGE_MONEY', 'Orange Money', TRUE, 2),
-  ('AIRTEL_MONEY', 'Airtel Money', TRUE, 3)
-ON CONFLICT (code) DO NOTHING;
-
-ALTER TABLE public.operateur_mobile_money ENABLE ROW LEVEL SECURITY;
-
-DROP POLICY IF EXISTS "operateur_mm_select_all" ON public.operateur_mobile_money;
-CREATE POLICY "operateur_mm_select_all"
-ON public.operateur_mobile_money
-FOR SELECT TO public
-USING (TRUE);
-
-DROP POLICY IF EXISTS "operateur_mm_admin_all" ON public.operateur_mobile_money;
-CREATE POLICY "operateur_mm_admin_all"
-ON public.operateur_mobile_money
-FOR ALL TO authenticated
-USING (public.is_admin())
-WITH CHECK (public.is_admin());
-
-CREATE OR REPLACE FUNCTION public.verifier_operateur_mm_actif()
-RETURNS TRIGGER AS $$
-BEGIN
-  IF NEW.mode = 'MOBILE_MONEY' THEN
-    IF NOT EXISTS (
-      SELECT 1 FROM public.operateur_mobile_money omm
-      WHERE omm.code = NEW.operateur AND omm.actif = TRUE
-    ) THEN
-      RAISE EXCEPTION 'Opérateur Mobile Money indisponible';
-    END IF;
-  END IF;
-  RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
-DROP TRIGGER IF EXISTS trg_verifier_operateur_mm_actif ON public.paiement;
-CREATE TRIGGER trg_verifier_operateur_mm_actif
-BEFORE INSERT OR UPDATE OF mode, operateur ON public.paiement
-FOR EACH ROW EXECUTE FUNCTION public.verifier_operateur_mm_actif();
+drop trigger if exists on_auth_user_created on auth.users;
+create trigger on_auth_user_created
+  after insert on auth.users
+  for each row execute function public.handle_new_user();
+```
