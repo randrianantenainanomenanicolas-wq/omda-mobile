@@ -1,4 +1,4 @@
-import type { BucketStockage, HorodatageISO, TailleOctets, TypeMime } from '../../models';
+import type { BucketStockage, TailleOctets, TypeMime } from '../../models';
 
 /**
  * Types communs de téléversement vers les buckets privés Supabase Storage.
@@ -40,12 +40,4 @@ export type FichierTeleverse = {
   chemin_stockage: string;
   mime_type: TypeMime;
   taille_octets: TailleOctets;
-};
-
-/** URL signée pour un dépôt direct dans le bucket `preuves`. */
-export type UrlTeleversementSignee = {
-  url: string;
-  chemin_stockage: string;
-  expire_at: HorodatageISO;
-  champs_formulaire?: Record<string, string>;
 };

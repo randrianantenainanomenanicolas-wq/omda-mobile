@@ -30,8 +30,7 @@ parcours **visiteur / candidat** (utilisateur SANS compte).
 | Corrélation | Réponse en erreur 5xx : `reference` à citer au support |
 
 **Sécurité** : le candidat n'a **aucun accès direct** à la base ni au storage
-en écriture libre ; les pièces/œuvres/preuves passent par les endpoints d'upload
-(ou par une URL signée à durée courte, cf. §5.9).
+en écriture libre ; les pièces et les œuvres passent par les endpoints d'upload.
 
 ---
 
@@ -156,14 +155,13 @@ une seule fois** ; l'app le conserve (stockage local) et l'affiche à l'écran L
 | Part | Contenu |
 |---|---|
 | `fichier` | binaire (≤ **20 Mo**) |
-| `bucket` | `pieces` \| `oeuvres` \| `preuves` |
+| `bucket` | `pieces` \| `oeuvres` |
 | `type` | pour `pieces` : `PHOTO` \| `CIN` \| `ACTE_NAISSANCE` \| `CERTIFICAT_RESIDENCE` \| `AUTORISATION_PARENTALE` \| `AUTRE` |
 | `oeuvre_id` | facultatif (rattachement à une œuvre) |
 
 MIME autorisés par bucket (identiques au schéma) :
 `pieces` → `image/jpeg`, `image/png`, `application/pdf` ;
-`oeuvres` → + `audio/mpeg`, `audio/wav` ;
-`preuves` → `image/jpeg`, `image/png`, `application/pdf`.
+`oeuvres` → + `audio/mpeg`, `audio/wav`.
 
 `201 Created`
 
@@ -252,23 +250,9 @@ déclenché ni demandé à ce stade (règle métier 1).
   "modes": [
     {
       "mode": "MOBILE_MONEY",
-      "libelle": "Mobile Money",
+      "libelle": "Paiement Mobile Money (MVola)",
       "operateurs": [
-        { "code": "MVOLA", "libelle": "MVola", "actif": true, "ordre": 1, "updated_at": "2026-09-20T05:00:00.000Z" },
-        { "code": "ORANGE_MONEY", "libelle": "Orange Money", "actif": true, "ordre": 2, "updated_at": "2026-09-20T05:00:00.000Z" },
-        { "code": "AIRTEL_MONEY", "libelle": "Airtel Money", "actif": false, "ordre": 3, "updated_at": "2026-09-20T05:00:00.000Z" }
-      ],
-      "coordonnees_bancaires": []
-    },
-    {
-      "mode": "VIREMENT_BANCAIRE",
-      "libelle": "Virement bancaire",
-      "operateurs": [],
-      "coordonnees_bancaires": [
-        { "id": "c1b0f2e4-...", "titulaire": "Association OMDA", "banque": "BNI",
-          "numero_compte": "00001 00000 12345678901 12", "iban": null, "swift": "BNIMGMGX",
-          "instructions": "Indiquez votre numéro de dossier (OMDA-…) en libellé du virement.",
-          "actif": true, "updated_at": "2026-09-20T05:00:00.000Z" }
+        { "code": "MVOLA", "libelle": "MVola", "actif": true, "ordre": 1, "updated_at": "2026-09-20T05:00:00.000Z" }
       ]
     }
   ]
@@ -277,20 +261,18 @@ déclenché ni demandé à ce stade (règle métier 1).
 
 Règles :
 - réponse identique au type `OptionsPaiementCandidat` du contrat TS :
-  `paiement_du` (montant dû) + `modes` ;
+  `paiement_du` (montant dû) + `modes` — **seul mode : `MOBILE_MONEY` (MVola)**,
+  aucun autre mode n'est proposé ;
 - `409 DEMANDE_NON_VALIDEE` si le dossier n'est pas `VALIDEE` ;
 - `paiement_du.montant` suit la ligne `tarif` (Ariary entier, `devise: "MGA"`) :
   le montant vient **toujours** du serveur, jamais de l'UI ;
-- les **opérateurs et modes inactifs doivent être absents ou marqués `actif: false`** —
+- les **opérateurs inactifs doivent être absents ou marqués `actif: false`** —
   l'app n'affiche **que** les éléments actifs (liste 100 % dynamique, jamais de
   codage dur côté UI) ;
 - `operateurs` reprend la table `operateur_mobile_money` (`code`, `libelle`,
-  `actif`, `ordre`, `updated_at`) ; un opérateur désactivé (`AIRTEL_MONEY`
-  ci-dessus) doit être **absent** de l'UI ;
-- `coordonnees_bancaires` reprend **exactement** les colonnes de la table
-  (`titulaire`, `banque`, `numero_compte`, `iban`, `swift`, `instructions`,
-  `actif`) et n'est renseigné que pour `mode = 'VIREMENT_BANCAIRE'` ; seules les
-  entrées `actif = true` sont affichées ;
+  `actif`, `ordre`, `updated_at`) ; **MVola est le seul opérateur** du schéma et
+  il est affiché dans l'UI **sans sélecteur** (non sélectionnable) ; un opérateur
+  désactivé doit être **absent** de l'UI ;
 - un champ d'aide facultatif (`instructions` par mode/opérateur) peut être ajouté
   par le serveur : il n'est jamais stocké en base, il est purement affiché.
 
@@ -305,12 +287,6 @@ Règles :
   "operateur": "MVOLA",
   "numero_telephone": "+261341234567"
 }
-```
-
-Variante virement bancaire :
-
-```json
-{ "numero_dossier": "OMDA-2026-000123", "mode": "VIREMENT_BANCAIRE" }
 ```
 
 Le `code_suivi` du contrat TS (`InitierPaiementEntree`) voyage dans l'en-tête
@@ -373,80 +349,13 @@ Règles :
 }
 ```
 
-- **Mobile Money** : confirmation **automatique** côté serveur (webhook opérateur,
+- **Mobile Money (MVola)** : confirmation **automatique** côté serveur (webhook opérateur,
   trace dans `journal_paiement`) ; l'app **interroge** cet endpoint
   (ex. toutes les 3 s, backoff exponentiel) ;
-- **Virement bancaire** : reste `EN_ATTENTE_VERIFICATION_AGENT` tant qu'un agent
-  n'a pas validé la preuve — **jamais** de `REUSSI` automatique ;
 - l'app ne passe à l'écran « Succès » que si `statut = 'REUSSI'` **et**
   `date_confirmation <> null` (confirmation externe impérative), avec
   `reference_externe` renseignée quand l'opérateur la fournit ;
 - `motif_echec` : renseigné pour `ECHEC_*` et `REJETE` (jamais vide dans ces cas).
-
----
-
-### 5.9 URL signée pour déposer une preuve de virement
-
-`POST /v1/paiements/{paiement_id}/preuve/url` — en-têtes `X-Code-Suivi`
-
-```json
-{ "nom_fichier": "recu-virement.pdf", "mime_type": "application/pdf", "taille_octets": 183022 }
-```
-
-`201 Created`
-
-```json
-{
-  "url": "https://storage.omda.mg/preuves/PAI-2026-000742/recu.pdf?X-Amz-...",
-  "chemin_stockage": "preuves/PAI-2026-000742/recu.pdf",
-  "expire_at": "2026-09-25T07:30:00.000Z",
-  "champs_formulaire": null
-}
-```
-
-Réponse identique au type `UrlTeleversementSignee` du contrat TS. L'app téléverse
-le fichier **directement vers le storage** (`PUT` sur `url` ; si
-`champs_formulaire` est renseigné, `POST` multipart avec ces champs), avec
-progression et retry, puis déclare le dépôt (§5.10). Erreurs
-`FICHIER_TROP_VOLUMINEUX` / `TYPE_FICHIER_NON_AUTORISE` renvoyées aussi à l'étape
-de déclaration, pour revalider côté serveur.
-
-### 5.10 Déclarer la preuve de virement déposée
-
-`POST /v1/paiements/{paiement_id}/preuve` — en-têtes `X-Code-Suivi`
-
-```json
-{
-  "chemin_stockage": "preuves/PAI-2026-000742/recu.pdf",
-  "mime_type": "application/pdf",
-  "taille_octets": 183022,
-  "reference_fournie": "VIR-2026-8891"
-}
-```
-
-`201 Created`
-
-```json
-{
-  "paiement_id": "3a9c2f10-...",
-  "reference_interne": "PAI-2026-000742",
-  "reference_externe": null,
-  "type": "ADHESION",
-  "mode": "VIREMENT_BANCAIRE",
-  "operateur": null,
-  "montant": 150000,
-  "devise": "MGA",
-  "statut": "EN_ATTENTE_VERIFICATION_AGENT",
-  "motif_echec": null,
-  "date_initiation": "2026-09-25T07:10:00.000Z",
-  "date_confirmation": null,
-  "instruction": null
-}
-```
-
-**Règle critique** : ce `201` n'est **pas** un succès. Le statut passe en
-`EN_ATTENTE_VERIFICATION_AGENT` ; le vert (`status-success`) reste interdit
-jusqu'à ce que le polling §5.8 renvoie `REUSSI` après vérification humaine.
 
 ---
 
@@ -459,7 +368,6 @@ jusqu'à ce que le polling §5.8 renvoie `REUSSI` après vérification humaine.
 | `listerCategories` | `GET /v1/categories?actives=true` | `Categorie[]` |
 | `listerTarifs` | `GET /v1/tarifs?actives=true&type_operation=&categorie_id=` | `Tarif[]` |
 | `estimerMontant` | `GET /v1/tarifs/estimation?type_operation=&categorie_id=` | `EstimationMontant` avec `estimation: true` + `mention` |
-| `obtenirCoordonneesBancaires` | `GET /v1/coordonnees-bancaires?actives=true` | `CoordonneesBancaires[]` |
 | `listerOperateursMobileMoney` | `GET /v1/operateurs-mobile-money?actifs=true` | `OperateurMobileMoney[]` |
 
 `GET /v1/tarifs/estimation` renvoie par exemple :
@@ -488,13 +396,11 @@ liste ; l'UI ne codifie aucun montant, opérateur ou tarif (règle AI_RULES).
 | `creerDemande` | `POST /v1/demandes` (§5.1) |
 | `mettreAJourDemande` | `PATCH /v1/demandes/{numero_dossier}` (§5.2) |
 | `soumettreDemande` | `POST /v1/demandes/{numero_dossier}/envoi` (§5.4) |
-| `televerserFichier` | `POST /v1/demandes/{numero_dossier}/fichiers` si `bucket ∈ {pieces, oeuvres}` (§5.3) ; sinon URL signée §5.9 |
+| `televerserFichier` | `POST /v1/demandes/{numero_dossier}/fichiers` (§5.3) |
 | `suivreDemande` | `GET /v1/suivi/{numero_dossier}` (§5.5) |
 | `obtenirOptionsPaiement` | `GET /v1/paiements/options/{numero_dossier}` (§5.6) |
 | `initierPaiement` | `POST /v1/paiements` (§5.7) |
 | `obtenirEtatPaiement` | `GET /v1/paiements/{reference_interne}` (§5.8) |
-| `obtenirUrlTeleversementPreuve` | `POST /v1/paiements/{paiement_id}/preuve/url` (§5.9) |
-| `declarerPreuveVirement` | `POST /v1/paiements/{paiement_id}/preuve` (§5.10) |
 
 ---
 
@@ -504,18 +410,18 @@ liste ; l'UI ne codifie aucun montant, opérateur ou tarif (règle AI_RULES).
 2. **Validation ≠ membre** : `REUSSI` sur les frais d'adhésion ne finalise
    l'adhésion (`ADHESION_TERMINEE`) qu'après traitement serveur ; les identifiants
    du nouveau membre partent alors par e-mail.
-3. `REUSSI` **uniquement** sur confirmation externe (webhook Mobile Money ou
-   vérification humaine du virement) + `date_confirmation_serveur`.
-4. Virement : jamais de succès immédiat → `EN_ATTENTE_VERIFICATION_AGENT`.
-5. Liste des opérateurs/modes strictement **dynamique** (désactivé = absent).
-6. `motif_rejet` obligatoire dès que `statut = 'REJETEE'`.
-7. Upload : **20 Mo max**, MIME restreints par bucket, progression/retry gérés
+3. `REUSSI` **uniquement** sur confirmation externe (webhook Mobile Money MVola)
+   + `date_confirmation_serveur` — jamais de succès immédiat.
+4. Liste des opérateurs/modes strictement **dynamique** (désactivé = absent) ;
+   seul mode : `MOBILE_MONEY` (MVola, opérateur non sélectionnable dans l'UI).
+5. `motif_rejet` obligatoire dès que `statut = 'REJETEE'`.
+6. Upload : **20 Mo max**, MIME restreints par bucket, progression/retry gérés
    par le client, rejeu possible après coupure réseau (Idempotency-Key sur l'envoi).
-8. Délai affiché : `delai_indicatif_heures = 72` (**informatif**, jamais promis).
-9. Âge : `< 15` refus bloquant, `15–17` autorisation parentale exigée,
+7. Délai affiché : `delai_indicatif_heures = 72` (**informatif**, jamais promis).
+8. Âge : `< 15` refus bloquant, `15–17` autorisation parentale exigée,
    `≥ 18` rien — validé côté serveur (§5.1/§5.4), pas seulement dans l'UI.
-10. Le code de suivi n'est révélé qu'à la création/envoi ; jamais dans les
-    réponses ultérieures (seul `X-Code-Suivi` en en-tête le prouve).
+9. Le code de suivi n'est révélé qu'à la création/envoi ; jamais dans les
+   réponses ultérieures (seul `X-Code-Suivi` en en-tête le prouve).
 
 ## 9) Branchement et environnement
 
@@ -531,4 +437,4 @@ liste ; l'UI ne codifie aucun montant, opérateur ou tarif (règle AI_RULES).
 > Le reste (membre connecté) passe par Supabase : `AuthService` (Supabase Auth)
 > et `MemberRepository` (tables `utilisateur`, `membre`, `membre_categorie`,
 > `oeuvre`, `cotisation`, `paiement`, `notification` + buckets `pieces`,
-> `oeuvres`, `preuves`).
+> `oeuvres`).

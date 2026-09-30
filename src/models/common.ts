@@ -42,12 +42,11 @@ export const TAILLE_MAX_FICHIER_MO = 20;
 export const TYPES_MIME_AUTORISES = {
   pieces: ['image/jpeg', 'image/png', 'application/pdf'],
   oeuvres: ['audio/mpeg', 'audio/wav', 'application/pdf', 'image/jpeg', 'image/png'],
-  preuves: ['image/jpeg', 'image/png', 'application/pdf'],
 } as const;
 
 /** Buckets Supabase Storage déclarés dans le schéma. */
-export const BUCKETS_STOCKAGE = ['pieces', 'oeuvres', 'preuves'] as const;
+export const BUCKETS_STOCKAGE = ['pieces', 'oeuvres'] as const;
 export type BucketStockage = (typeof BUCKETS_STOCKAGE)[number];
 
-/** Types MIME autorisés (union des trois buckets). */
+/** Types MIME autorisés (union des buckets). */
 export type TypeMime = (typeof TYPES_MIME_AUTORISES)[BucketStockage][number];

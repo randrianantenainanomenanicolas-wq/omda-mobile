@@ -1,6 +1,5 @@
 import type {
   Categorie,
-  CoordonneesBancaires,
   DateISO,
   Documentation,
   HorodatageISO,
@@ -33,8 +32,6 @@ export const IDS_TEST = {
   categorie_ecrivain: '22222222-2222-4222-8222-222222222222',
   categorie_musicien: '33333333-3333-4333-8333-333333333333',
   categorie_arts_numeriques: '44444444-4444-4444-8444-444444444444',
-  coordonnees_bni: '55555555-5555-4555-8555-555555555555',
-  coordonnees_bfv: '66666666-6666-4666-8666-666666666666',
   oeuvre_validee: 'a0000000-0000-4000-8000-000000000001',
   oeuvre_en_validation: 'a0000000-0000-4000-8000-000000000002',
   oeuvre_rejetee: 'a0000000-0000-4000-8000-000000000003',
@@ -185,36 +182,10 @@ export const DOCUMENTATION_TEST: Documentation[] = [
   },
 ];
 
-/** Coordonnées bancaires : 1 active + 1 inactive (mode virement). */
-export const COORDONNEES_TEST: CoordonneesBancaires[] = [
-  {
-    id: IDS_TEST.coordonnees_bni,
-    titulaire: 'Association OMDA',
-    banque: 'BNI Madagascar',
-    numero_compte: '00001 00000 12345678901 12',
-    iban: null,
-    swift: 'BNIMGMGX',
-    instructions: 'Indiquez votre numéro de dossier (OMDA-…) en libellé du virement.',
-    actif: true,
-    updated_at: '2026-03-02T05:00:00.000Z',
-  },
-  {
-    id: IDS_TEST.coordonnees_bfv,
-    titulaire: 'Association OMDA',
-    banque: 'BFV — Société Générale',
-    numero_compte: '00002 00000 98765432109 87',
-    iban: null,
-    swift: 'BFAVMGMG',
-    instructions: 'Compte clôturé : ne doit pas être proposé au candidat.',
-    actif: false,
-    updated_at: '2026-03-02T05:00:00.000Z',
-  },
-];
-
 /**
- * Opérateurs Mobile Money (table `operateur_mobile_money`).
- * `AIRTEL_MONEY` est DÉSACTIVÉ : il ne doit jamais apparaître dans l'UI
- * (liste dynamique — règle métier 14). Voir `definirOperateurActif`.
+ * Opérateur Mobile Money (table `operateur_mobile_money`) : MVola UNIQUEMENT —
+ * c'est le seul opérateur du schéma. Voir `definirOperateurActif` pour la
+ * liste dynamique.
  */
 export const OPERATEURS_TEST: OperateurMobileMoney[] = [
   {
@@ -222,20 +193,6 @@ export const OPERATEURS_TEST: OperateurMobileMoney[] = [
     libelle: 'MVola',
     actif: true,
     ordre: 1,
-    updated_at: '2026-03-02T05:00:00.000Z',
-  },
-  {
-    code: 'ORANGE_MONEY',
-    libelle: 'Orange Money',
-    actif: true,
-    ordre: 2,
-    updated_at: '2026-03-02T05:00:00.000Z',
-  },
-  {
-    code: 'AIRTEL_MONEY',
-    libelle: 'Airtel Money',
-    actif: false,
-    ordre: 3,
     updated_at: '2026-03-02T05:00:00.000Z',
   },
 ];

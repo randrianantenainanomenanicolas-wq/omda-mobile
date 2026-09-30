@@ -1,17 +1,13 @@
 import {
   CODE_DEVISE_MGA,
-  TAILLE_MAX_FICHIER_OCTETS,
-  TYPES_MIME_AUTORISES,
   type DateISO,
   type StatutDemande,
-  type TypeMime,
   type UUID,
 } from '../../models';
 import type {
   CandidateApi,
   ConfirmationEnvoiDemande,
   CreerDemandeEntree,
-  DeclarerPreuveVirementEntree,
   DemandeBrouillon,
   EtapeSuivi,
   EtatPaiementCandidat,
@@ -26,10 +22,9 @@ import type {
   SuiviDemande,
   SuiviDemandeEntree,
   TeleversementEntree,
-  UrlTeleversementSignee,
 } from '../contracts';
 import { CODES_ERREUR_CANDIDAT, erreurMetier, ok, type Result } from '../contracts';
-import { COORDONNEES_TEST, tarifApplique } from './donneesTestMock';
+import { tarifApplique } from './donneesTestMock';
 import {
   avancerPaiement,
   CODES_MOCK,
@@ -82,10 +77,8 @@ function ageDepuis(date_naissance: DateISO): number {
  * `CandidateApi` simulé : parcours visiteur/candidat complet, sans backend.
  *
  * ─ Délais réseau et pannes pilotables (`configMock.ts`).
- * ─ Mobile Money : `INITIE` → `EN_ATTENTE_CONFIRMATION` → `REUSSI`/`ECHEC_*`
+ * ─ Mobile Money MVola : `INITIE` → `EN_ATTENTE_CONFIRMATION` → `REUSSI`/`ECHEC_*`
  *   selon le NUMÉRO saisi (cf. `docs/DONNEES_TEST.md`).
- * ─ Virement bancaire : la preuve une fois déposée ⇒ `EN_ATTENTE_VERIFICATION_AGENT`,
- *   JAMAIS de succès immédiat.
  */
 export class MockCandidateApi implements CandidateApi {
   /** Crée un dossier `BROUILLON` (moins de 15 ans ⇒ `AGE_INSUFFISANT`). */
@@ -341,9 +334,9 @@ export class MockCandidateApi implements CandidateApi {
   }
 
   /**
-   * Initie un paiement (idempotent côté serveur via `Idempotency-Key`).
-   * ⚠️ La réponse n'est PAS un succès : Mobile Money démarre à `INITIE`,
-   * le virement à `EN_ATTENTE_PREUVE` (la preuve reste à déposer).
+   * Initie un paiement Mobile Money (idempotent côté serveur via `Idempotency-Key`).
+   * ⚠️ La réponse n'est PAS un succès : le paiement démarre à `INITIE`, la
+   * confirmation venant du serveur (polling).
    */
   async initierPaiement(entree: InitierPaiementEntree): Promise<Result<EtatPaiementCandidat>> {
     const panne = await preparerAppelMock();
@@ -382,19 +375,24 @@ export class MockCandidateApi implements CandidateApi {
       );
     }
 
-    if (entree.mode === 'MOBILE_MONEY') {
-      if (!entree.operateur || !estOperateurActif(entree.operateur)) {
-        return erreurMetier(
-          CODES_ERREUR_CANDIDAT.OPERATEUR_INDISPONIBLE,
-          'Cet opérateur Mobile Money est momentanément indisponible.',
-        );
-      }
-      if (!entree.numero_telephone || !entree.numero_telephone.startsWith('+261')) {
-        return refusMock(
-          CODES_MOCK.NUMERO_TELEPHONE_INVALIDE,
-          'Indiquez un numéro Mobile Money au format +261…',
-        );
-      }
+    // Seul mode de l'application : Mobile Money (MVola).
+    if (entree.mode !== 'MOBILE_MONEY') {
+      return refusMock(
+        CODES_MOCK.MODE_PAIEMENT_INVALIDE,
+        'Seul le paiement par Mobile Money (MVola) est proposé.',
+      );
+    }
+    if (!entree.operateur || !estOperateurActif(entree.operateur)) {
+      return erreurMetier(
+        CODES_ERREUR_CANDIDAT.OPERATEUR_INDISPONIBLE,
+        'Cet opérateur Mobile Money est momentanément indisponible.',
+      );
+    }
+    if (!entree.numero_telephone || !entree.numero_telephone.startsWith('+261')) {
+      return refusMock(
+        CODES_MOCK.NUMERO_TELEPHONE_INVALIDE,
+        'Indiquez un numéro Mobile Money au format +261…',
+      );
     }
 
     const montant = montantDu(dossier);
@@ -406,7 +404,6 @@ export class MockCandidateApi implements CandidateApi {
     }
 
     const paiementId = genererUUID();
-    const mobileMoney = entree.mode === 'MOBILE_MONEY';
     const interne: PaiementCandidatInterne = {
       paiement_id: paiementId,
       reference_interne: nouvelleReferencePaiement('CANDIDAT'),
@@ -415,18 +412,15 @@ export class MockCandidateApi implements CandidateApi {
       montant: montant.montant,
       devise: montant.devise,
       mode: entree.mode,
-      operateur: mobileMoney ? (entree.operateur ?? null) : null,
-      numero_telephone: mobileMoney ? (entree.numero_telephone ?? null) : null,
-      statut: mobileMoney ? 'INITIE' : 'EN_ATTENTE_PREUVE',
+      operateur: entree.operateur ?? null,
+      numero_telephone: entree.numero_telephone ?? null,
+      statut: 'INITIE',
       motif_echec: null,
       date_initiation: maintenantISO(),
       date_confirmation: null,
-      instruction: mobileMoney
-        ? INSTRUCTION_PAIEMENT.initie
-        : 'Effectuez le virement, puis déposez la preuve pour vérification.',
+      instruction: INSTRUCTION_PAIEMENT.initie,
       nombre_polls: 0,
       numero_dossier: dossier.demande.numero_dossier,
-      preuve: null,
     };
     paiementsCandidatMock.set(paiementId, interne);
 
@@ -435,8 +429,8 @@ export class MockCandidateApi implements CandidateApi {
 
   /**
    * Polling du statut : c'est le « serveur » qui fait avancer la machine à
-   * états. `REUSSI` n'apparaît qu'après confirmation de l'opérateur (Mobile
-   * Money) ou validation d'un agent (virement).
+   * états. `REUSSI` n'apparaît qu'après confirmation de l'opérateur Mobile
+   * Money (MVola).
    */
   async obtenirEtatPaiement(reference_interne: string): Promise<Result<EtatPaiementCandidat>> {
     const panne = await preparerAppelMock();
@@ -453,101 +447,6 @@ export class MockCandidateApi implements CandidateApi {
     }
 
     avancerPaiement(paiement);
-    return ok(etatCandidatPublic(paiement));
-  }
-
-  /** URL signée (bucket `preuves`) pour déposer la preuve de virement. */
-  async obtenirUrlTeleversementPreuve(entree: {
-    paiement_id: UUID;
-    nom_fichier: string;
-    mime_type: TypeMime;
-    taille_octets: number;
-  }): Promise<Result<UrlTeleversementSignee>> {
-    const panne = await preparerAppelMock();
-    if (panne) {
-      return panne;
-    }
-
-    const paiement = paiementsCandidatMock.get(entree.paiement_id);
-    if (!paiement) {
-      return refusMock(
-        CODES_MOCK.PAIEMENT_INTROUVABLE,
-        'Ce paiement est introuvable. Relancez le paiement depuis le suivi de votre demande.',
-      );
-    }
-    if (paiement.mode !== 'VIREMENT_BANCAIRE') {
-      return refusMock(
-        CODES_MOCK.MODE_PAIEMENT_INVALIDE,
-        'Aucune preuve de virement n’est attendue pour ce paiement.',
-      );
-    }
-
-    const mimesAutorises = TYPES_MIME_AUTORISES.preuves as readonly string[];
-    if (!mimesAutorises.includes(entree.mime_type)) {
-      return erreurMetier(
-        CODES_ERREUR_CANDIDAT.TYPE_FICHIER_NON_AUTORISE,
-        'Ce format de fichier n’est pas accepté : utilisez une photo (JPEG, PNG) ou un PDF.',
-      );
-    }
-    if (entree.taille_octets > TAILLE_MAX_FICHIER_OCTETS) {
-      return erreurMetier(
-        CODES_ERREUR_CANDIDAT.FICHIER_TROP_VOLUMINEUX,
-        'Le fichier dépasse la taille maximale de 20 Mo.',
-      );
-    }
-
-    const chemin_stockage = `preuves/${paiement.reference_interne}/${entree.nom_fichier.trim()}`;
-    return ok({
-      url: `https://mock.omda.mg/storage/${chemin_stockage}?token=${genererUUID()}`,
-      chemin_stockage,
-      expire_at: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
-    });
-  }
-
-  /**
-   * Déclare la preuve de virement déposée.
-   * ⚠️ Le statut obtenu est `EN_ATTENTE_VERIFICATION_AGENT` : JAMAIS un succès
-   * immédiat (règle métier 6). Le passage à `REUSSI` reste une décision
-   * « serveur » (`simulerVirementValideParAgent` en mode debug).
-   */
-  async declarerPreuveVirement(
-    entree: DeclarerPreuveVirementEntree,
-  ): Promise<Result<EtatPaiementCandidat>> {
-    const panne = await preparerAppelMock();
-    if (panne) {
-      return panne;
-    }
-
-    const paiement = paiementsCandidatMock.get(entree.paiement_id);
-    if (!paiement) {
-      return refusMock(
-        CODES_MOCK.PAIEMENT_INTROUVABLE,
-        'Ce paiement est introuvable. Relancez le paiement depuis le suivi de votre demande.',
-      );
-    }
-    if (paiement.mode !== 'VIREMENT_BANCAIRE') {
-      return refusMock(
-        CODES_MOCK.MODE_PAIEMENT_INVALIDE,
-        'Aucune preuve de virement n’est attendue pour ce paiement.',
-      );
-    }
-    if (paiement.statut === 'REUSSI') {
-      return erreurMetier(
-        CODES_ERREUR_CANDIDAT.PAIEMENT_DEJA_REUSSI,
-        'Le paiement de ces frais a déjà été confirmé.',
-      );
-    }
-
-    paiement.preuve = {
-      chemin_stockage: entree.chemin_stockage,
-      mime_type: entree.mime_type,
-      taille_octets: entree.taille_octets,
-      reference_fournie: entree.reference_fournie ?? null,
-    };
-    paiement.statut = 'EN_ATTENTE_VERIFICATION_AGENT';
-    paiement.motif_echec = null;
-    paiement.instruction = INSTRUCTION_PAIEMENT.virement_recu;
-
     return ok(etatCandidatPublic(paiement));
   }
 }
@@ -582,26 +481,16 @@ function montantDu(dossier: DossierMock): MontantPaiementDu | null {
   return { type: 'ADHESION', montant: tarif.montant, devise: tarif.devise };
 }
 
-/** Modes réellement disponibles : opérateurs actifs ET coordonnées actives. */
+/** Modes réellement disponibles : Mobile Money (MVola) si un opérateur est actif. */
 function modesDisponibles(): ModePaiementDisponible[] {
   const operateurs = operateursActifs();
-  const coordonnees = COORDONNEES_TEST.filter((element) => element.actif);
   const modes: ModePaiementDisponible[] = [];
 
   if (operateurs.length > 0) {
     modes.push({
       mode: 'MOBILE_MONEY',
-      libelle: 'Mobile Money',
+      libelle: 'Paiement Mobile Money (MVola)',
       operateurs,
-      coordonnees_bancaires: [],
-    });
-  }
-  if (coordonnees.length > 0) {
-    modes.push({
-      mode: 'VIREMENT_BANCAIRE',
-      libelle: 'Virement bancaire',
-      operateurs: [],
-      coordonnees_bancaires: coordonnees,
     });
   }
   return modes;

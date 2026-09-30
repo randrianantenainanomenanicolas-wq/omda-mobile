@@ -4,17 +4,16 @@
  * Ils implémentent EXACTEMENT les mêmes contrats que les futures implémentations
  * réelles (`HttpCandidateApi`, Supabase), donc les écrans n'auront rien à changer
  * lors du branchement :
- * - `MockPublicContentService` : documentation, tarifs, catégories, coordonnées,
+ * - `MockPublicContentService` : documentation, tarifs, catégories,
  *   opérateurs (listes dynamiques, éléments désactivés absents) ;
- * - `MockCandidateApi` : parcours visiteur/candidat, suivi, paiement Mobile Money
- *   (machine à états + numéros de test) et virement (preuve ⇒
- *   `EN_ATTENTE_VERIFICATION_AGENT`, jamais de succès immédiat) ;
+ * - `MockCandidateApi` : parcours visiteur/candidat, suivi, paiement Mobile
+ *   Money MVola (machine à états + numéros de test) ;
  * - `MockAuthService` : connexion, session, mot de passe oublié non révélateur,
  *   changement obligatoire du mot de passe ;
  * - `MockMemberRepository` : profil, tableau de bord, œuvres, cotisations,
  *   paiements, notifications.
  *
- * Mode debug (délais, pannes, vérification de virement) : `./configMock`.
+ * Mode debug (délais, pannes) : `./configMock`.
  * Données et scénarios de test : `docs/DONNEES_TEST.md`.
  */
 

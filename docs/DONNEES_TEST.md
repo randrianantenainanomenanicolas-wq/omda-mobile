@@ -2,7 +2,7 @@
 
 - Source unique : `src/services/mocks/donneesTestMock.ts` (fixtures fixes, réalistes, reproductibles).
 - Activation : `EXPO_PUBLIC_USE_MOCKS=true` (voir `.env.example`).
-- Vérification automatisée : `npx --yes tsx tools/verif-mocks.ts` → `TOUS LES CONTROLES SONT PASSES` (97 contrôles sur les 4 mocks).
+- Vérification automatisée : `npx --yes tsx tools/verif-mocks.ts` → `TOUS LES CONTROLES SONT PASSES` (111 contrôles sur les 4 mocks).
 
 Aucun montant / catégorie / opérateur n'est codé en dur dans l'UI : tout vient d'un service (mock aujourd'hui, serveur demain).
 
@@ -44,12 +44,7 @@ Données de `membre@omda.mg` : n° d'adhérent `OMDA-2026-A-000123`, catégorie 
 | +261340000003 | `ECHEC_AUTRE` | Échec technique de l'opérateur |
 | +261340000004 | `REJETE` | Annulé par le titulaire |
 
-Tout autre numéro `+261…` → `REUSSI`. Opérateurs actifs : MVola (ordre 1), Orange Money (2) ; Airtel Money désactivé (jamais affiché — liste dynamique).
-
-## Virement bancaire
-
-- Coordonnées actives : **BNI Madagascar** — titulaire `Association OMDA`, compte `00001 00000 12345678901 12`, SWIFT `BNIMGMGX`, instructions « Indiquez votre numéro de dossier (OMDA-…) en libellé du virement. » La BFV (compte clôturé) est inactive : elle n'est jamais proposée.
-- Dépôt de preuve (JPEG / PNG / PDF, ≤ 20 Mo, bucket `preuves`) → `EN_ATTENTE_VERIFICATION_AGENT` : **jamais** de succès immédiat. `simulerVirementValideParAgent(true)` simule la décision de l'agent → `REUSSI`.
+Tout autre numéro `+261…` → `REUSSI`. **Seul opérateur : MVola** (unique du schéma, non sélectionnable dans l'UI) ; liste dynamique : s'il est désactivé côté « serveur » (`definirOperateurActif('MVOLA', false)`), la liste devient vide et aucun paiement n'est proposé.
 
 ## Tarifs (Ariary, dynamiques via `estimerMontant`)
 
@@ -69,7 +64,7 @@ Toute estimation est affichée avec la mention : « Estimation — le montant fi
 
 ## Codes d'erreur propres aux mocks (`CODES_MOCK`)
 
-`DEMANDE_NON_MODIFIABLE`, `PAIEMENT_INTROUVABLE`, `PREUVE_ATTENDUE`, `MODE_PAIEMENT_INVALIDE`, `NOTIFICATION_INTROUVABLE`, `NUMERO_TELEPHONE_INVALIDE`, `OEUVRE_NON_MODIFIABLE`, `PAIEMENT_DEJA_REUSSI`, `ARTICLE_INTROUVABLE`, `TARIF_INDISPONIBLE`, `TELEVERSEMENT_ANNULE`.
+`DEMANDE_NON_MODIFIABLE`, `PAIEMENT_INTROUVABLE`, `MODE_PAIEMENT_INVALIDE`, `NOTIFICATION_INTROUVABLE`, `NUMERO_TELEPHONE_INVALIDE`, `OEUVRE_NON_MODIFIABLE`, `PAIEMENT_DEJA_REUSSI`, `ARTICLE_INTROUVABLE`, `TARIF_INDISPONIBLE`, `TELEVERSEMENT_ANNULE`.
 
 Ils sont à reprendre tels quels côté serveur au branchement (les codes métier déjà contractés figurent dans `docs/API_CANDIDAT.md`).
 
@@ -82,7 +77,6 @@ Ils sont à reprendre tels quels côté serveur au branchement (les codes métie
 | `forcerErreurServeur(bool)` | Chaque appel → 503 |
 | `definirProbabilitesErreur({ reseau?, serveur? })` | Pannes aléatoires (probabilité 0 → 1) |
 | `definirOperateurActif(code, bool)` | Liste d'opérateurs dynamique (côté « serveur ») |
-| `simulerVirementValideParAgent(bool)` | Décision d'agent sur la preuve de virement |
 | `reinitialiserOptionsMock()` | Retour aux réglages par défaut |
 
 Défauts : `polls_avant_statut_final = 2` (poll 1 → `EN_ATTENTE_CONFIRMATION`, poll 2 → statut final), aucune panne.
@@ -90,11 +84,10 @@ Défauts : `polls_avant_statut_final = 2` (poll 1 → `EN_ATTENTE_CONFIRMATION`,
 ## Règles non configurables
 
 - `REUSSI` uniquement par confirmation « serveur » (machine à états) — jamais par une action locale de l'app.
-- Un virement reste `EN_ATTENTE_VERIFICATION_AGENT` tant qu'aucun agent ne l'a validé.
 - `TENTATIVES_MAX = 3` échecs de connexion consécutifs avant `TROP_DE_TENTATIVES`.
 - Le compteur d'échecs porte sur l'e-mail : il est remis à zéro à chaque connexion réussie.
 
 ## Scénarios couverts par le smoke test
 
-`npx --yes tsx tools/verif-mocks.ts` exécute 84 contrôles : contenus publics (listes dynamiques, tarifs, estimation), suivi des dossiers (numéro + code, timeline, rejet motivé), création/brouillon (âge, autorisation parentale, 2 œuvres minimum), paiement Mobile Money (machine à états + numéros ci-dessus), virement (preuve → agent), pannes et délais (`configMock`), puis l'espace membre (connexion, profil, tableau de bord, œuvres, cotisation → `PAYEE` + notification, notifications lues, états vides, comptes désactivé et bloqué, mot de passe oublié non révélateur, déconnexion) et les catégories multiples (règle métier 9 : 1 appartenance ACTIVE au départ, demande de catégorie supplémentaire créée `EN_ATTENTE` sans activation locale, refus `CATEGORIE_DEJA_DEMANDEE` / `CATEGORIE_DEJA_ENREGISTREE` / `CATEGORIE_INDISPONIBLE`, profil final avec 2 catégories dont 1 en attente).
+`npx --yes tsx tools/verif-mocks.ts` exécute 111 contrôles : contenus publics (listes dynamiques, tarifs, estimation), suivi des dossiers (numéro + code, timeline, rejet motivé), création/brouillon (âge, autorisation parentale, 2 œuvres minimum), paiement Mobile Money MVola (machine à états + numéros ci-dessus : succès, solde insuffisant, échec autre, rejet, délai dépassé), pannes et délais (`configMock`), puis l'espace membre (connexion, profil, tableau de bord, œuvres, cotisation → `PAYEE` + notification, notifications lues, états vides, comptes désactivé et bloqué, mot de passe oublié non révélateur, déconnexion) et les catégories multiples (règle métier 9 : 1 appartenance ACTIVE au départ, demande de catégorie supplémentaire créée `EN_ATTENTE` sans activation locale, refus `CATEGORIE_DEJA_DEMANDEE` / `CATEGORIE_DEJA_ENREGISTREE` / `CATEGORIE_INDISPONIBLE`, profil final avec 2 catégories dont 1 en attente).
 

@@ -1,6 +1,5 @@
 import type {
   Categorie,
-  CoordonneesBancaires,
   Documentation,
   OperateurMobileMoney,
   Tarif,
@@ -14,7 +13,6 @@ import type {
 import { ok, type Result } from '../contracts';
 import {
   CATEGORIES_TEST,
-  COORDONNEES_TEST,
   DOCUMENTATION_TEST,
   MENTION_ESTIMATION,
   TARIFS_TEST,
@@ -120,15 +118,6 @@ export class MockPublicContentService implements PublicContentService {
       mention: MENTION_ESTIMATION,
       valide_jusqu_au: tarif.date_fin,
     });
-  }
-
-  /** Coordonnées bancaires actives (le compte clôturé est absent). */
-  async obtenirCoordonneesBancaires(): Promise<Result<CoordonneesBancaires[]>> {
-    const panne = await preparerAppelMock();
-    if (panne) {
-      return panne;
-    }
-    return ok(COORDONNEES_TEST.filter((coordonnees) => coordonnees.actif));
   }
 
   /** Opérateurs Mobile Money actifs, triés par `ordre` (règle métier 14). */

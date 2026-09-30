@@ -8,10 +8,7 @@
  *
  * ⚠️ Rappels NON configurables (règles métier) :
  * - `REUSSI` n'est simulé que par la « confirmation serveur » (machine à états
- *   du paiement, côté serveur) : jamais par une action locale de l'app ;
- * - un virement reste `EN_ATTENTE_VERIFICATION_AGENT` tant qu'un agent n'a pas
- *   validé la preuve (`simulerVirementValideParAgent` simule CETTE validation,
- *   jamais un succès immédiat au dépôt de la preuve).
+ *   du paiement, côté serveur) : jamais par une action locale de l'app.
  */
 
 export type OptionsMock = {
@@ -29,8 +26,6 @@ export type OptionsMock = {
   probabilite_erreur_serveur: number;
   /** Nombre d'interrogations avant que Mobile Money ne renvoie son statut final. */
   polls_avant_statut_final: number;
-  /** Simule la vérification de la preuve de virement PAR UN AGENT (côté serveur). */
-  virement_valide_par_agent: boolean;
 };
 
 export const OPTIONS_MOCK_PAR_DEFAUT: OptionsMock = {
@@ -41,7 +36,6 @@ export const OPTIONS_MOCK_PAR_DEFAUT: OptionsMock = {
   probabilite_erreur_reseau: 0,
   probabilite_erreur_serveur: 0,
   polls_avant_statut_final: 2,
-  virement_valide_par_agent: false,
 };
 
 /** Réglages courants du mode debug (objet mutable, volontairement exposé). */
@@ -76,12 +70,4 @@ export function definirProbabilitesErreur(probabilites: { reseau?: number; serve
   if (probabilites.serveur !== undefined) {
     optionsMock.probabilite_erreur_serveur = Math.min(1, Math.max(0, probabilites.serveur));
   }
-}
-
-/**
- * Simule la décision d'un AGENT sur la preuve de virement.
- * `false` (défaut) : le paiement reste `EN_ATTENTE_VERIFICATION_AGENT`.
- */
-export function simulerVirementValideParAgent(actif: boolean): void {
-  optionsMock.virement_valide_par_agent = actif;
 }

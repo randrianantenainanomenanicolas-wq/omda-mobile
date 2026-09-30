@@ -54,7 +54,6 @@ const BUCKET_OEUVRES: BucketStockage = 'oeuvres';
 const LIBELLE_FORMATS: Record<BucketStockage, string> = {
   pieces: 'JPEG, PNG ou PDF',
   oeuvres: 'MP3, WAV, PDF, JPEG ou PNG',
-  preuves: 'JPEG, PNG ou PDF',
 };
 
 type ExigencePiece = {
@@ -171,7 +170,6 @@ const MIME_PAR_EXTENSION: Record<string, TypeMime> = {
 const MIMES_CONNUS: readonly string[] = [
   ...TYPES_MIME_AUTORISES.pieces,
   ...TYPES_MIME_AUTORISES.oeuvres,
-  ...TYPES_MIME_AUTORISES.preuves,
 ];
 
 function estMimeConnu(valeur: string): valeur is TypeMime {

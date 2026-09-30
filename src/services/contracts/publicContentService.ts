@@ -1,6 +1,5 @@
 import type {
   Categorie,
-  CoordonneesBancaires,
   Documentation,
   MontantAriary,
   OperateurMobileMoney,
@@ -13,8 +12,8 @@ import type { Result } from './result';
 /**
  * Contrat des contenus PUBLICS (visiteur sans compte).
  *
- * Toutes les valeurs affichées (catégories, tarifs, opérateurs, coordonnées
- * bancaires, articles) proviennent d'ici : rien n'est codé en dur dans l'UI.
+ * Toutes les valeurs affichées (catégories, tarifs, opérateurs Mobile Money,
+ * articles) proviennent d'ici : rien n'est codé en dur dans l'UI.
  * Implémentation par défaut : mocks ; branchement réel : Supabase (lecture)
  * ou API REST pour le simulateur.
  */
@@ -33,9 +32,6 @@ export interface PublicContentService {
 
   /** Estimation dynamique du montant (écran Tarifs / simulateur). */
   estimerMontant(entree: EstimationMontantEntree): Promise<Result<EstimationMontant>>;
-
-  /** Coordonnées bancaires ACTIVES (mode virement). */
-  obtenirCoordonneesBancaires(): Promise<Result<CoordonneesBancaires[]>>;
 
   /** Opérateurs Mobile Money ACTIFS (un opérateur désactivé est absent). */
   listerOperateursMobileMoney(): Promise<Result<OperateurMobileMoney[]>>;

@@ -1,6 +1,5 @@
 import type {
   CodeDevise,
-  CoordonneesBancaires,
   DateISO,
   HorodatageISO,
   ModePaiement,
@@ -9,7 +8,6 @@ import type {
   OperateurPaiement,
   StatutDemande,
   StatutPaiement,
-  TypeMime,
   TypePaiement,
   TypePiece,
   UUID,
@@ -20,7 +18,6 @@ import type {
   FichierTeleverse,
   OptionsTeleversement,
   TeleversementEntree,
-  UrlTeleversementSignee,
 } from './televersement';
 
 /**
@@ -141,7 +138,10 @@ export type SuiviDemande = {
 
 export type OptionsPaiementCandidat = {
   paiement_du: MontantPaiementDu;
-  /** Modes proposés par le serveur (Mobile Money et/ou virement). */
+  /**
+   * Modes proposés par le serveur : le seul mode de l'application est
+   * `MOBILE_MONEY` (MVola).
+   */
   modes: ModePaiementDisponible[];
 };
 
@@ -150,8 +150,6 @@ export type ModePaiementDisponible = {
   libelle: string;
   /** Opérateurs ACTIFS uniquement : un opérateur désactivé est absent. */
   operateurs: OperateurMobileMoney[];
-  /** Coordonnées bancaires ACTIVES uniquement. */
-  coordonnees_bancaires: CoordonneesBancaires[];
 };
 
 export type InitierPaiementEntree = {
@@ -189,15 +187,6 @@ export type EtatPaiementCandidat = {
 /* -------------------------------------------------------------- Téléversement */
 /* Types communs : cf. `./televersement` (`TeleversementEntree`, `FichierDepose`, …). */
 
-export type DeclarerPreuveVirementEntree = {
-  paiement_id: UUID;
-  chemin_stockage: string;
-  mime_type: TypeMime;
-  taille_octets: number;
-  /** Référence du virement indiquée par le candidat (facultative). */
-  reference_fournie?: string | null;
-};
-
 /* ----------------------------------------------------------------- Contrat */
 
 export interface CandidateApi {
@@ -214,7 +203,7 @@ export interface CandidateApi {
   /** Envoie le dossier complet : statut `ENVOYEE`, délai indicatif 72 h, aucun paiement. */
   soumettreDemande(entree: SoumettreDemandeEntree): Promise<Result<ConfirmationEnvoiDemande>>;
 
-  /** Téléverse un fichier (pièce, œuvre, attestation, preuve) avec progression. */
+  /** Téléverse un fichier (pièce, œuvre, attestation) avec progression. */
   televerserFichier(
     entree: TeleversementEntree,
     options?: OptionsTeleversement,
@@ -231,22 +220,6 @@ export interface CandidateApi {
 
   /** Polling du statut : `REUSSI` n'est renvoyé que si le serveur l'a confirmé. */
   obtenirEtatPaiement(reference_interne: string): Promise<Result<EtatPaiementCandidat>>;
-
-  /** Demande une URL signée pour déposer la preuve de virement (si nécessaire). */
-  obtenirUrlTeleversementPreuve(entree: {
-    paiement_id: UUID;
-    nom_fichier: string;
-    mime_type: TypeMime;
-    taille_octets: number;
-  }): Promise<Result<UrlTeleversementSignee>>;
-
-  /**
-   * Déclare la preuve de virement déposée.
-   * Le statut obtenu est `EN_ATTENTE_VERIFICATION_AGENT` : jamais un succès immédiat.
-   */
-  declarerPreuveVirement(
-    entree: DeclarerPreuveVirementEntree,
-  ): Promise<Result<EtatPaiementCandidat>>;
 }
 
 /* -------------------------------------------------------- Codes d'erreur métier */

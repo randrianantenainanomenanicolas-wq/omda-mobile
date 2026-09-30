@@ -48,15 +48,14 @@ import {
  *
  * Contient aussi les utilitaires communs aux 4 mocks :
  * - délais réseau et pannes (cf. `configMock.ts`) ;
- * - machine à états des paiements Mobile Money / virement bancaire ;
- * - listes dynamiques (opérateurs actifs, coordonnées actives) ;
+ * - machine à états des paiements Mobile Money (MVola) ;
+ * - liste dynamique des opérateurs Mobile Money (MVola) ;
  * - liens temporaires de consultation des documents stockés
  *   (`urlConsultationFichier`) ;
  * - état des comptes, dossiers, œuvres, cotisations et notifications.
  *
  * ⚠️ Aucune confirmation locale : un paiement n'atteint `REUSSI` que par la
- * machine à états « serveur » ci-dessous, et un virement reste
- * `EN_ATTENTE_VERIFICATION_AGENT` jusqu'à la décision simulée d'un agent.
+ * machine à états « serveur » ci-dessous (webhook de l'opérateur simulé).
  */
 
 /* ------------------------------------------------- Codes propres au mode mock */
@@ -69,7 +68,6 @@ import {
 export const CODES_MOCK = {
   DEMANDE_NON_MODIFIABLE: 'DEMANDE_NON_MODIFIABLE',
   PAIEMENT_INTROUVABLE: 'PAIEMENT_INTROUVABLE',
-  PREUVE_ATTENDUE: 'PREUVE_ATTENDUE',
   MODE_PAIEMENT_INVALIDE: 'MODE_PAIEMENT_INVALIDE',
   NOTIFICATION_INTROUVABLE: 'NOTIFICATION_INTROUVABLE',
   NUMERO_TELEPHONE_INVALIDE: 'NUMERO_TELEPHONE_INVALIDE',
@@ -86,7 +84,6 @@ export const CODES_MOCK = {
 export const INSTRUCTION_PAIEMENT = {
   initie: 'Une demande de paiement a été envoyée à l’opérateur. Validez-la sur votre téléphone.',
   en_attente: 'En attente de la confirmation de l’opérateur…',
-  virement_recu: 'Votre preuve de virement a été reçue : elle sera vérifiée par un agent.',
 } as const;
 
 /** Motifs d'échec (jamais vides pour `ECHEC_*` et `REJETE`). */
@@ -446,18 +443,12 @@ export type DossierMock = {
 /** Dossiers préexistants (fixtures) et dossiers créés pendant la session. */
 export const dossiersMock = new Map<string, DossierMock>();
 
-/** Paiement candidat interne : état + contexte + preuve de virement éventuelle. */
+/** Paiement candidat interne : état + contexte (champs internes au mock). */
 export type PaiementCandidatInterne = EtatPaiementCandidat & {
   nombre_polls: number;
   numero_dossier: string;
   /** Numéro Mobile Money utilisé (champ interne au mock, absent du contrat). */
   numero_telephone: string | null;
-  preuve: {
-    chemin_stockage: string;
-    mime_type: TypeMime;
-    taille_octets: TailleOctets;
-    reference_fournie: string | null;
-  } | null;
 };
 
 /** Paiement membre interne (`Paiement` du schéma + compteur de polling). */
@@ -547,7 +538,6 @@ DOSSIERS_TEST.forEach((dossier) => {
       nombre_polls: 0,
       numero_dossier: dossier.numero_dossier,
       numero_telephone: '+261340000001',
-      preuve: null,
     });
   }
 });
@@ -598,34 +588,15 @@ function definirInstruction(paiement: PaiementSuivi, valeur: string | null): voi
 
 /**
  * Fait avancer un paiement exactement comme le ferait le serveur : webhook de
- * l'opérateur (Mobile Money) ou décision d'un agent (virement). Appelée à
- * chaque interrogation par polling : l'app n'invente jamais un statut.
+ * l'opérateur Mobile Money (MVola). Appelée à chaque interrogation par
+ * polling : l'app n'invente jamais un statut.
  */
 export function avancerPaiement(paiement: PaiementSuivi): void {
   if (STATUTS_FINAUX.includes(paiement.statut)) {
     return;
   }
 
-  if (paiement.mode === 'VIREMENT_BANCAIRE') {
-    if (paiement.statut === 'EN_ATTENTE_PREUVE' && !optionsMock.virement_valide_par_agent) {
-      // Aucune preuve déposée : le paiement attend le dépôt (jamais de succès).
-      return;
-    }
-    if (optionsMock.virement_valide_par_agent) {
-      paiement.statut = 'REUSSI';
-      paiement.date_confirmation = maintenantISO();
-      paiement.reference_externe = paiement.reference_externe ?? 'VIR-2026-000001';
-      paiement.motif_echec = null;
-      definirInstruction(paiement, null);
-      return;
-    }
-    // Dépôt de la preuve effectué : jamais de succès immédiat.
-    paiement.statut = 'EN_ATTENTE_VERIFICATION_AGENT';
-    definirInstruction(paiement, INSTRUCTION_PAIEMENT.virement_recu);
-    return;
-  }
-
-  // Mobile Money : INITIE → EN_ATTENTE_CONFIRMATION → REUSSI / ECHEC_* / REJETE
+  // Mobile Money (MVola) : INITIE → EN_ATTENTE_CONFIRMATION → REUSSI / ECHEC_* / REJETE
   paiement.nombre_polls += 1;
   if (paiement.nombre_polls < optionsMock.polls_avant_statut_final) {
     paiement.statut = 'EN_ATTENTE_CONFIRMATION';

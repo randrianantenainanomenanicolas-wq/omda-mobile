@@ -11,11 +11,10 @@ import {
   oeuvresDemandeCategorieMock,
   reinitialiserEchecsConnexion,
   reinitialiserOptionsMock,
-  simulerVirementValideParAgent,
 } from '../src/services/mocks';
 
 /**
- * Vérification d'exécution des mocks (smoke test) : 121 contrôles sur les 4 mocks
+ * Vérification d'exécution des mocks (smoke test) : 111 contrôles sur les 4 mocks
  * + fixtures. Lancer avec `npx --yes tsx tools/verif-mocks.ts` — sortie attendue :
  * `TOUS LES CONTROLES SONT PASSES`.
  */
@@ -37,25 +36,17 @@ async function principal(): Promise<void> {
 
   const operateurs = await mockPublicContentService.listerOperateursMobileMoney();
   verifier(
-    'opérateur désactivé absent (AIRTEL_MONEY)',
-    operateurs.ok && !operateurs.valeur.some((element) => element.code === 'AIRTEL_MONEY'),
-  );
-  verifier(
-    'opérateurs actifs triés (MVOLA puis ORANGE_MONEY)',
+    'opérateur unique MVola actif (seul opérateur du schéma)',
     operateurs.ok &&
-      operateurs.valeur.map((element) => element.code).join(',') === 'MVOLA,ORANGE_MONEY',
+      operateurs.valeur.length === 1 &&
+      operateurs.valeur[0].code === 'MVOLA' &&
+      operateurs.valeur[0].actif,
   );
 
   const categories = await mockPublicContentService.listerCategories();
   verifier(
     'catégorie désactivée absente (3 catégories actives)',
     categories.ok && categories.valeur.length === 3,
-  );
-
-  const coordonnees = await mockPublicContentService.obtenirCoordonneesBancaires();
-  verifier(
-    'coordonnées bancaires actives uniquement (1 sur 2)',
-    coordonnees.ok && coordonnees.valeur.length === 1 && coordonnees.valeur[0].banque === 'BNI Madagascar',
   );
 
   const estimation = await mockPublicContentService.estimerMontant({
@@ -87,7 +78,6 @@ async function principal(): Promise<void> {
 
   await scenarioSuivi();
   await scenarioMobileMoney();
-  await scenarioVirement();
   await scenarioPannes();
   await scenarioMembre();
 
@@ -184,12 +174,13 @@ async function scenarioSuivi(): Promise<void> {
     code_suivi: 'K7X4-9B2Q',
   });
   verifier(
-    'options : montant serveur + 2 modes + 2 opérateurs actifs + 1 compte actif',
+    'options : montant serveur + seul mode Mobile Money (MVola)',
     options.ok &&
       options.valeur.paiement_du.montant === 150000 &&
-      options.valeur.modes.length === 2 &&
-      options.valeur.modes[0].operateurs.length === 2 &&
-      options.valeur.modes[1].coordonnees_bancaires.length === 1,
+      options.valeur.modes.length === 1 &&
+      options.valeur.modes[0].mode === 'MOBILE_MONEY' &&
+      options.valeur.modes[0].operateurs.length === 1 &&
+      options.valeur.modes[0].operateurs[0].code === 'MVOLA',
   );
 
   const modification = await mockCandidateApi.mettreAJourDemande(
@@ -332,11 +323,13 @@ async function scenarioSuivi(): Promise<void> {
 }
 
 async function scenarioMobileMoney(): Promise<void> {
+  // Opérateur désactivé côté « serveur » : MVola doit être refusé pendant ce laps.
+  definirOperateurActif('MVOLA', false);
   const operateurInactif = await mockCandidateApi.initierPaiement({
     numero_dossier: 'OMDA-2026-000001',
     code_suivi: 'K7X4-9B2Q',
     mode: 'MOBILE_MONEY',
-    operateur: 'AIRTEL_MONEY',
+    operateur: 'MVOLA',
     numero_telephone: '+261340000001',
   });
   verifier(
@@ -345,6 +338,7 @@ async function scenarioMobileMoney(): Promise<void> {
       operateurInactif.erreur.type === 'metier' &&
       operateurInactif.erreur.code === 'OPERATEUR_INDISPONIBLE',
   );
+  definirOperateurActif('MVOLA', true);
 
   const numeroInvalide = await mockCandidateApi.initierPaiement({
     numero_dossier: 'OMDA-2026-000001',
@@ -406,104 +400,6 @@ async function scenarioMobileMoney(): Promise<void> {
       paiementInconnu.erreur.type === 'metier' &&
       paiementInconnu.erreur.code === 'PAIEMENT_INTROUVABLE',
   );
-
-  const preuveSurPaiementInconnu = await mockCandidateApi.declarerPreuveVirement({
-    paiement_id: 'paiement-inexistant',
-    chemin_stockage: 'preuves/inconnu.pdf',
-    mime_type: 'application/pdf',
-    taille_octets: 1200,
-  });
-  verifier(
-    'preuve sur un paiement inexistant -> PAIEMENT_INTROUVABLE',
-    !preuveSurPaiementInconnu.ok &&
-      preuveSurPaiementInconnu.erreur.type === 'metier' &&
-      preuveSurPaiementInconnu.erreur.code === 'PAIEMENT_INTROUVABLE',
-  );
-}
-
-async function scenarioVirement(): Promise<void> {
-  const initie = await mockCandidateApi.initierPaiement({
-    numero_dossier: 'OMDA-2026-000008',
-    code_suivi: 'V4J9-6W3N',
-    mode: 'VIREMENT_BANCAIRE',
-  });
-  verifier(
-    'virement initié -> EN_ATTENTE_PREUVE + tarif de la catégorie (120 000 Ar)',
-    initie.ok &&
-      initie.valeur.statut === 'EN_ATTENTE_PREUVE' &&
-      initie.valeur.montant === 120000 &&
-      initie.valeur.operateur === null,
-  );
-  const paiementId = initie.ok ? initie.valeur.paiement_id : '';
-  const reference = initie.ok ? initie.valeur.reference_interne : '';
-
-  const url = await mockCandidateApi.obtenirUrlTeleversementPreuve({
-    paiement_id: paiementId,
-    nom_fichier: 'recu-virement.pdf',
-    mime_type: 'application/pdf',
-    taille_octets: 183022,
-  });
-  verifier(
-    'URL signée de preuve (bucket preuves)',
-    url.ok && url.valeur.chemin_stockage.startsWith('preuves/') && url.valeur.expire_at.length > 0,
-  );
-  const chemin = url.ok ? url.valeur.chemin_stockage : '';
-
-  const urlTropVolumineuse = await mockCandidateApi.obtenirUrlTeleversementPreuve({
-    paiement_id: paiementId,
-    nom_fichier: 'enorme.pdf',
-    mime_type: 'application/pdf',
-    taille_octets: 22000000,
-  });
-  verifier(
-    'preuve de plus de 20 Mo -> FICHIER_TROP_VOLUMINEUX',
-    !urlTropVolumineuse.ok &&
-      urlTropVolumineuse.erreur.type === 'metier' &&
-      urlTropVolumineuse.erreur.code === 'FICHIER_TROP_VOLUMINEUX',
-  );
-
-  const urlMimeRefuse = await mockCandidateApi.obtenirUrlTeleversementPreuve({
-    paiement_id: paiementId,
-    nom_fichier: 'son.mp3',
-    mime_type: 'audio/mpeg',
-    taille_octets: 120000,
-  });
-  verifier(
-    'format non autorisé pour `preuves` -> TYPE_FICHIER_NON_AUTORISE',
-    !urlMimeRefuse.ok &&
-      urlMimeRefuse.erreur.type === 'metier' &&
-      urlMimeRefuse.erreur.code === 'TYPE_FICHIER_NON_AUTORISE',
-  );
-
-  const declaree = await mockCandidateApi.declarerPreuveVirement({
-    paiement_id: paiementId,
-    chemin_stockage: chemin,
-    mime_type: 'application/pdf',
-    taille_octets: 183022,
-    reference_fournie: 'VIR-2026-8891',
-  });
-  verifier(
-    'preuve déposée -> EN_ATTENTE_VERIFICATION_AGENT (jamais REUSSI)',
-    declaree.ok &&
-      declaree.valeur.statut === 'EN_ATTENTE_VERIFICATION_AGENT' &&
-      declaree.valeur.date_confirmation === null,
-  );
-
-  const pollingVirement = await mockCandidateApi.obtenirEtatPaiement(reference);
-  verifier(
-    'polling virement : reste en attente d’un agent (aucun succès automatique)',
-    pollingVirement.ok && pollingVirement.valeur.statut === 'EN_ATTENTE_VERIFICATION_AGENT',
-  );
-
-  simulerVirementValideParAgent(true);
-  const apresAgent = await mockCandidateApi.obtenirEtatPaiement(reference);
-  verifier(
-    'validation simulée par un agent -> REUSSI (+ date_confirmation)',
-    apresAgent.ok &&
-      apresAgent.valeur.statut === 'REUSSI' &&
-      apresAgent.valeur.date_confirmation !== null,
-  );
-  simulerVirementValideParAgent(false);
 }
 
 async function scenarioPannes(): Promise<void> {
@@ -538,17 +434,17 @@ async function scenarioPannes(): Promise<void> {
   verifier('délai réseau simulé respecté (>= 250 ms)', duree >= 250, `${duree} ms`);
   definirDelaisMock(0, 0);
 
-  definirOperateurActif('AIRTEL_MONEY', true);
-  const avecAirtel = await mockPublicContentService.listerOperateursMobileMoney();
+  definirOperateurActif('MVOLA', false);
+  const sansMvola = await mockPublicContentService.listerOperateursMobileMoney();
   verifier(
-    'opérateur réactivé côté « serveur » : il réapparaît',
-    avecAirtel.ok && avecAirtel.valeur.some((element) => element.code === 'AIRTEL_MONEY'),
+    'opérateur désactivé : la liste devient vide (liste dynamique)',
+    sansMvola.ok && sansMvola.valeur.length === 0,
   );
-  definirOperateurActif('AIRTEL_MONEY', false);
-  const sansAirtel = await mockPublicContentService.listerOperateursMobileMoney();
+  definirOperateurActif('MVOLA', true);
+  const avecMvola = await mockPublicContentService.listerOperateursMobileMoney();
   verifier(
-    'opérateur désactivé : il disparaît de nouveau (liste dynamique)',
-    sansAirtel.ok && !sansAirtel.valeur.some((element) => element.code === 'AIRTEL_MONEY'),
+    'opérateur réactivé côté « serveur » : MVola réapparaît',
+    avecMvola.ok && avecMvola.valeur.length === 1 && avecMvola.valeur[0].code === 'MVOLA',
   );
 }
 
@@ -948,11 +844,13 @@ async function scenarioMembreOeuvres(): Promise<void> {
       cotisationAbsente.erreur.code === 'COTISATION_INTROUVABLE',
   );
 
+  // Opérateur désactivé côté « serveur » : MVola doit être refusé pendant ce laps.
+  definirOperateurActif('MVOLA', false);
   const operateurInactif = await mockMemberRepository.initierPaiement({
     type: 'COTISATION',
     cotisation_id: cotisationId,
     mode: 'MOBILE_MONEY',
-    operateur: 'AIRTEL_MONEY',
+    operateur: 'MVOLA',
     numero_telephone: '+261340000001',
   });
   verifier(
@@ -961,6 +859,7 @@ async function scenarioMembreOeuvres(): Promise<void> {
       operateurInactif.erreur.type === 'metier' &&
       operateurInactif.erreur.code === 'OPERATEUR_INDISPONIBLE',
   );
+  definirOperateurActif('MVOLA', true);
 
   const numeroInvalide = await mockMemberRepository.initierPaiement({
     type: 'COTISATION',

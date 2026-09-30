@@ -101,17 +101,17 @@ export type TypePaiement = (typeof TYPES_PAIEMENT)[number];
 export const TYPES_OPERATION_TARIF = ['ADHESION', 'DEPOT_OEUVRE', 'COTISATION'] as const;
 export type TypeOperationTarif = (typeof TYPES_OPERATION_TARIF)[number];
 
-export const MODES_PAIEMENT = ['MOBILE_MONEY', 'VIREMENT_BANCAIRE'] as const;
+/** Mode unique de l'application : Mobile Money (MVola). */
+export const MODES_PAIEMENT = ['MOBILE_MONEY'] as const;
 export type ModePaiement = (typeof MODES_PAIEMENT)[number];
 
-export const OPERATEURS_PAIEMENT = ['MVOLA', 'ORANGE_MONEY', 'AIRTEL_MONEY'] as const;
+/** Opérateur unique — table `operateur_paiement` (MVola uniquement). */
+export const OPERATEURS_PAIEMENT = ['MVOLA'] as const;
 export type OperateurPaiement = (typeof OPERATEURS_PAIEMENT)[number];
 
 export const STATUTS_PAIEMENT = [
   'INITIE',
   'EN_ATTENTE_CONFIRMATION',
-  'EN_ATTENTE_PREUVE',
-  'EN_ATTENTE_VERIFICATION_AGENT',
   'REUSSI',
   'ECHEC_SOLDE_INSUFFISANT',
   'ECHEC_AUTRE',
@@ -133,8 +133,6 @@ export const TYPES_NOTIFICATION = [
   'PAIEMENT_ECHEC',
   'OEUVRE_VALIDEE',
   'OEUVRE_REJETEE',
-  'VIREMENT_VALIDE',
-  'VIREMENT_REJETE',
   'IDENTIFIANTS_ENVOYES',
   'GLOBALE',
 ] as const;

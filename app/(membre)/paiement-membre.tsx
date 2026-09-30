@@ -11,10 +11,8 @@ import {
   InfoBanner,
   LoadingState,
   ScreenContainer,
-  SelectField,
   StatusPill,
   TextField,
-  type OptionSelect,
   type StatutPill,
 } from '../../src/components/ui';
 import type { OperateurPaiement, Paiement, StatutPaiement, TypePaiement } from '../../src/models';
@@ -69,8 +67,6 @@ const STATUTS_FINAUX: StatutPaiement[] = [
 const STATUTS_AFFICHES: Record<StatutPaiement, { variante: StatutPill; libelle: string }> = {
   INITIE: { variante: 'pending', libelle: 'Paiement initié' },
   EN_ATTENTE_CONFIRMATION: { variante: 'pending', libelle: 'En attente de l’opérateur' },
-  EN_ATTENTE_PREUVE: { variante: 'pending', libelle: 'Preuve attendue' },
-  EN_ATTENTE_VERIFICATION_AGENT: { variante: 'pending', libelle: 'Vérification par un agent' },
   REUSSI: { variante: 'success', libelle: 'Paiement confirmé' },
   ECHEC_SOLDE_INSUFFISANT: { variante: 'error', libelle: 'Échec : solde insuffisant' },
   ECHEC_AUTRE: { variante: 'error', libelle: 'Échec technique de l’opérateur' },
@@ -167,8 +163,8 @@ export default function PaiementMembreScreen() {
   const [messageErreur, setMessageErreur] = useState('');
   const [messageVide, setMessageVide] = useState('');
   const [contexte, setContexte] = useState<ContextePaiement | null>(null);
-  const [operateurs, setOperateurs] = useState<OptionSelect[]>([]);
   const [operateurChoisi, setOperateurChoisi] = useState<OperateurPaiement | null>(null);
+  const [operateurLibelle, setOperateurLibelle] = useState<string | null>(null);
   const [numeroTelephone, setNumeroTelephone] = useState('');
   const [erreurNumero, setErreurNumero] = useState<string | null>(null);
 
@@ -334,12 +330,10 @@ export default function PaiementMembreScreen() {
         return;
       }
 
-      setOperateurs(
-        reponseOperateurs.valeur.map((element) => ({
-          valeur: element.code,
-          libelle: element.libelle,
-        })),
-      );
+      // Opérateur unique (MVola) : retenu automatiquement, jamais sélectionnable.
+      const premierOperateur = reponseOperateurs.valeur[0];
+      setOperateurChoisi(premierOperateur.code);
+      setOperateurLibelle(premierOperateur.libelle);
 
       if (typeParam === 'COTISATION') {
         await chargerContexteCotisation();
@@ -427,7 +421,7 @@ export default function PaiementMembreScreen() {
     if (!contexte) return;
 
     if (!operateurChoisi) {
-      setErreurInitiation('Sélectionnez l’opérateur Mobile Money qui sera débité.');
+      setErreurInitiation('Aucun opérateur Mobile Money n’est disponible pour le moment.');
       return;
     }
 
@@ -582,15 +576,13 @@ export default function PaiementMembreScreen() {
         <View className="mt-5 gap-4">
           <Text className="text-base font-semibold text-omda-black">Payer par Mobile Money</Text>
 
-          <SelectField
-            libelle="Opérateur Mobile Money"
-            options={operateurs}
-            valeur={operateurChoisi}
-            onChangeValeur={(valeur) => setOperateurChoisi(valeur as OperateurPaiement)}
-            obligatoire
-            libelleAucuneOption="Aucun opérateur Mobile Money disponible pour le moment."
-            desactive={initiationEnCours}
-          />
+          {/* Opérateur unique (MVola) : affiché depuis le service, non sélectionnable. */}
+          <View className="flex-row items-center rounded-xl border border-omda-borderGray bg-omda-warmGray px-4 py-3">
+            <Icone nom="mobile-screen-button" taille={16} classeCouleur="text-omda-textGray" />
+            <Text className="ml-2 flex-1 text-sm text-omda-black">
+              {operateurLibelle ? `Opérateur : ${operateurLibelle}` : 'Opérateur Mobile Money'}
+            </Text>
+          </View>
 
           <TextField
             libelle="Numéro Mobile Money"

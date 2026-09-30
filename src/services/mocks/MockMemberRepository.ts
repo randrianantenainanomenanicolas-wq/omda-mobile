@@ -778,20 +778,24 @@ export class MockMemberRepository implements MemberRepository {
       return sessionRequise();
     }
 
-    const mobileMoney = entree.mode === 'MOBILE_MONEY';
-    if (mobileMoney) {
-      if (!entree.operateur || !estOperateurActif(entree.operateur)) {
-        return erreurMetier(
-          CODES_ERREUR_MEMBRE.OPERATEUR_INDISPONIBLE,
-          'Cet opérateur Mobile Money est momentanément indisponible.',
-        );
-      }
-      if (!entree.numero_telephone || !entree.numero_telephone.startsWith('+261')) {
-        return refusMock(
-          CODES_MOCK.NUMERO_TELEPHONE_INVALIDE,
-          'Indiquez un numéro Mobile Money au format +261…',
-        );
-      }
+    // Seul mode de l'application : Mobile Money (MVola).
+    if (entree.mode !== 'MOBILE_MONEY') {
+      return refusMock(
+        CODES_MOCK.MODE_PAIEMENT_INVALIDE,
+        'Seul le paiement par Mobile Money (MVola) est proposé dans l’espace membre.',
+      );
+    }
+    if (!entree.operateur || !estOperateurActif(entree.operateur)) {
+      return erreurMetier(
+        CODES_ERREUR_MEMBRE.OPERATEUR_INDISPONIBLE,
+        'Cet opérateur Mobile Money est momentanément indisponible.',
+      );
+    }
+    if (!entree.numero_telephone || !entree.numero_telephone.startsWith('+261')) {
+      return refusMock(
+        CODES_MOCK.NUMERO_TELEPHONE_INVALIDE,
+        'Indiquez un numéro Mobile Money au format +261…',
+      );
     }
 
     let montant = 0;
@@ -869,11 +873,11 @@ export class MockMemberRepository implements MemberRepository {
       montant,
       devise: CODE_DEVISE_MGA,
       mode: entree.mode,
-      operateur: mobileMoney ? (entree.operateur ?? null) : null,
-      numero_telephone: mobileMoney ? (entree.numero_telephone ?? null) : null,
+      operateur: entree.operateur ?? null,
+      numero_telephone: entree.numero_telephone ?? null,
       reference_interne: nouvelleReferencePaiement('MEMBRE'),
       reference_externe: null,
-      statut: mobileMoney ? 'INITIE' : 'EN_ATTENTE_PREUVE',
+      statut: 'INITIE',
       motif_echec: null,
       demande_adhesion_id: null,
       oeuvre_id: oeuvreId,

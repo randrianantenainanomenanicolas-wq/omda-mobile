@@ -115,7 +115,6 @@ Mapping recommandé :
 - Suivi : `faMagnifyingGlass`
 - Paiement : `faMoneyBillWave` / `faCreditCard`
 - Mobile Money : `faMobileScreenButton`
-- Virement : `faBuildingColumns`
 - Upload : `faCloudArrowUp`
 - Document : `faFilePdf`, `faIdCard`, `faImage`
 - Succès : `faCircleCheck` (status-success)
@@ -147,14 +146,13 @@ Le mobile doit consommer une API REST (à brancher plus tard) pour :
 - suivi public (numéro + code)
 - options de paiement disponibles (modes + opérateurs actifs)
 - initiation + polling paiement
-- URL signée upload preuve virement (si nécessaire)
 
 **Dans la version livrée** : implémenter un `CandidateApi` typé avec une implémentation `MockCandidateApi` par défaut, et une implémentation `HttpCandidateApi` prête à brancher (baseURL via env).
 
 ### 9.2 Membre (connecté) : Supabase
 - Auth : Supabase Auth
 - Données : `utilisateur`, `membre`, `membre_categorie`, `oeuvre`, `cotisation`, `paiement`, `notification`
-- Storage : `pieces`, `oeuvres`, `preuves`
+- Storage : `pieces`, `oeuvres`
 
 **Dans la version livrée** : mettre en place une couche `MemberRepository` typée avec `MockMemberRepository` par défaut + squelette `SupabaseMemberRepository`.
 
@@ -167,7 +165,6 @@ Le mobile doit consommer une API REST (à brancher plus tard) pour :
 4. Œuvre : envoi → validation → paiement → dépôt finalisé (jamais de paiement à l’envoi)
 5. Paiement “réussi” uniquement si serveur confirme `paiement.statut=REUSSI`
 6. Mobile Money : confirmation serveur automatique (polling)  
-   Virement : statut attente jusqu’à vérification humaine (preuve virement)
 7. Âge :
    - < 15 : refus bloquant
    - 15–17 : autorisation parentale obligatoire
@@ -269,19 +266,14 @@ Contraintes upload :
 
 ### N. Paiement candidat
 - Objet “Frais d’adhésion”, montant non modifiable
-- Modes selon serveur : Mobile Money / Virement
+- Mode unique : Mobile Money (MVola) — opérateur servi par le serveur, non sélectionnable
 - États paiement (UI + mapping)
   - INITIE, EN_ATTENTE_CONFIRMATION, REUSSI, REJETE, ECHEC_*, etc.
 
 Mobile Money :
-- opérateurs proposés = uniquement actifs (liste dynamique)
+- opérateur proposé = uniquement s'il est actif (liste dynamique servie par le serveur)
 - numéro +261
 - polling statut
-
-Virement :
-- coordonnées bancaires actives
-- instructions
-- upload preuve → statut EN_ATTENTE_VERIFICATION_AGENT (jamais succès immédiat)
 
 ### O. Succès adhésion (après paiement confirmé)
 Uniquement si serveur confirme `REUSSI` + adhésion finalisée

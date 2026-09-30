@@ -31,8 +31,6 @@ const TYPES_AFFICHES: Record<TypeNotification, { icone: NomIcone; libelle: strin
   PAIEMENT_ECHEC: { icone: 'circle-xmark', libelle: 'Paiement échoué' },
   OEUVRE_VALIDEE: { icone: 'circle-check', libelle: 'Œuvre validée' },
   OEUVRE_REJETEE: { icone: 'circle-xmark', libelle: 'Œuvre rejetée' },
-  VIREMENT_VALIDE: { icone: 'building-columns', libelle: 'Virement validé' },
-  VIREMENT_REJETE: { icone: 'building-columns', libelle: 'Virement rejeté' },
   IDENTIFIANTS_ENVOYES: { icone: 'id-card', libelle: 'Identifiants envoyés' },
   GLOBALE: { icone: 'bullhorn', libelle: 'Annonce OMDA' },
 };

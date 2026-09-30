@@ -35,12 +35,7 @@ type Blocage = {
 };
 
 /** Statuts signifiant « décision du serveur encore attendue ». */
-const STATUTS_EN_ATTENTE: StatutPaiement[] = [
-  'INITIE',
-  'EN_ATTENTE_CONFIRMATION',
-  'EN_ATTENTE_PREUVE',
-  'EN_ATTENTE_VERIFICATION_AGENT',
-];
+const STATUTS_EN_ATTENTE: StatutPaiement[] = ['INITIE', 'EN_ATTENTE_CONFIRMATION'];
 
 function parametreTexte(valeur: string | string[] | undefined): string {
   if (typeof valeur === 'string') return valeur.trim();

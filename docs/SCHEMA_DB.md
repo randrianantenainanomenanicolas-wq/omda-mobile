@@ -1,10 +1,10 @@
 # OMDA — Base de données Supabase (MVOLA uniquement)
 
-Ce document contient l'intégralité du script SQL de la base de données OMDA, nettoyé de toute référence au virement bancaire et configuré exclusivement pour les paiements via Mobile Money (**MVOLA**).
+Ce document contient l'intégralité du script SQL de la base de données OMDA, configuré exclusivement pour les paiements via Mobile Money (**MVOLA**).
 
 ```sql
 -- ============================================================
--- OMDA — DB_SUPABASE (sans virement, MVOLA uniquement)
+-- OMDA — DB_SUPABASE (MVOLA uniquement)
 -- PostgreSQL / Supabase
 -- ============================================================
 
@@ -12,7 +12,7 @@ Ce document contient l'intégralité du script SQL de la base de données OMDA, 
 create extension if not exists "pgcrypto";
 
 -- ============================================================
--- Types énumérés (SANS virement)
+-- Types énumérés
 -- ============================================================
 
 create type role_utilisateur as enum (
@@ -66,7 +66,7 @@ create type mode_paiement as enum ('MOBILE_MONEY');
 -- Opérateur unique
 create type operateur_paiement as enum ('MVOLA');
 
--- Statuts paiement : suppression des statuts virement
+-- Statuts paiement
 create type statut_paiement as enum (
   'INITIE',
   'EN_ATTENTE_CONFIRMATION',
@@ -95,7 +95,7 @@ create type statut_adhesion_categorie as enum (
   'ANNULEE'
 );
 
--- Notifications : suppression de VIREMENT_VALIDE / VIREMENT_REJETE
+-- Notifications
 create type type_notification as enum (
   'DEMANDE_ENVOYEE',
   'DEMANDE_VALIDEE',
@@ -399,7 +399,7 @@ create table jeton_reinitialisation (
 );
 
 -- ============================================================
--- Storage buckets (SANS bucket preuves)
+-- Storage buckets
 -- ============================================================
 
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
@@ -454,7 +454,7 @@ returns boolean as $$
 $$ language sql security definer stable;
 
 -- ============================================================
--- Activer RLS sur toutes les tables (sans virement)
+-- Activer RLS sur toutes les tables
 -- ============================================================
 
 alter table public.categorie enable row level security;

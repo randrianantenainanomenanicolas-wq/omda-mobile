@@ -2,8 +2,6 @@ import type {
   CodeDevise,
   HorodatageISO,
   MontantAriary,
-  TailleOctets,
-  TypeMime,
   UUID,
 } from './common';
 import type {
@@ -59,24 +57,6 @@ export type Paiement = {
   date_confirmation: HorodatageISO | null;
   created_at: HorodatageISO;
   updated_at: HorodatageISO;
-};
-
-/**
- * Preuve de virement — table `preuve_virement`.
- * Un virement ne passe jamais à `REUSSI` automatiquement : il reste
- * `EN_ATTENTE_VERIFICATION_AGENT` jusqu'à vérification de la preuve.
- */
-export type PreuveVirement = {
-  id: UUID;
-  paiement_id: UUID;
-  chemin_stockage: string;
-  mime_type: TypeMime;
-  taille_octets: TailleOctets;
-  reference_fournie: string | null;
-  date_upload: HorodatageISO;
-  agent_id: UUID | null;
-  date_verification: HorodatageISO | null;
-  motif_rejet: string | null;
 };
 
 /** Journal technique d'un paiement — table `journal_paiement`. */

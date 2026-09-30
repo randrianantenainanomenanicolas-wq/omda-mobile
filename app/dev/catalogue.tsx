@@ -154,10 +154,10 @@ export default function CatalogueDeveloppement() {
         <UploadTile libelle="Photo d’identité" statut="vide" obligatoire onSelectionner={AUCUNE_ACTION} />
         <UploadTile libelle="CIN légalisée" statut="enCours" nomFichier="cin-legalisee.pdf" progression={42} />
         <UploadTile
-          libelle="Preuve de virement"
+          libelle="Fichier de l’œuvre"
           statut="verification"
-          nomFichier="recu-virement.jpg"
-          message="La preuve sera vérifiée par un agent : le paiement reste en attente jusqu’à confirmation."
+          nomFichier="oeuvre-deposee.pdf"
+          message="Envoi en cours de vérification par le serveur OMDA."
         />
         <UploadTile libelle="Attestation de diffusion" statut="reussi" nomFichier="attestation-diffusion.pdf" />
         <UploadTile

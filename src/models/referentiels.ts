@@ -32,19 +32,6 @@ export type Tarif = {
   updated_at: HorodatageISO;
 };
 
-/** Coordonnées bancaires affichées pour un virement — table `coordonnees_bancaires`. */
-export type CoordonneesBancaires = {
-  id: UUID;
-  titulaire: string;
-  banque: string;
-  numero_compte: string;
-  iban: string | null;
-  swift: string | null;
-  instructions: string | null;
-  actif: boolean;
-  updated_at: HorodatageISO;
-};
-
 /** Article de documentation — table `documentation`. */
 export type Documentation = {
   id: UUID;
