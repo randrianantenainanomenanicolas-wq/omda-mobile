@@ -1,5 +1,12 @@
 /**
- * `MemberRepository` réel (Supabase : Auth + DB + Storage) — étapes 17 et 18.
+ * `MemberRepository` réel (Supabase : Auth + DB + Storage) — étapes 17 à 20.
+ *
+ * Étape 20 — STORAGE branché : `televerserFichier` (envoi NATIF avec progression
+ * et annulation) et `obtenirUrlFichier` (lien de consultation SIGNÉ pour les
+ * buckets privés) délèguent à `./storage` — buckets `pieces` / `oeuvres`
+ * uniquement. Le `mime_type` rendu par l'envoi est celui qui sera enregistré
+ * dans `attestation_diffusion.mime_type` (colonne `not null`) par les écritures
+ * d'œuvres.
  *
  * Étape 18 — LECTURES branchées sur les tables du schéma
  * (`docs/SCHEMA_DB.md`), chaque requête étant filtrée par le membre connecté
@@ -11,9 +18,8 @@
  * - Cotisations (T)   : `cotisation`
  * - Notifications (V) : `notification` (+ annonces globales)
  *
- * Les ÉCRITURES (profil, catégories, œuvres, paiements, notifications) et le
- * STORAGE (`obtenirUrlFichier`, `televerserFichier`) refusent encore proprement
- * via `erreurNonBranche()` : aucun écran ne plante en mode réel.
+ * Les ÉCRITURES (profil, catégories, œuvres, paiements, notifications) refusent
+ * encore proprement via `erreurNonBranche()` : aucun écran ne plante en mode réel.
  *
  * Le mode mock reste le défaut : `EXPO_PUBLIC_USE_MOCKS` non passé à `false`
  * n'instancie jamais cette classe (cf. `docs/BRANCHEMENT.md`).
@@ -62,6 +68,7 @@ import {
 } from '../contracts';
 import { erreurNonBranche } from '../nonImplemente';
 import { estSupabaseConfigure, getSupabaseClient, MESSAGE_SUPABASE_NON_CONFIGURE } from './client';
+import { bucketDepuisChemin, getSignedUrl, uploadFile } from './storage';
 
 /* --------------------------------------------------------------- Helpers */
 
@@ -87,6 +94,14 @@ function sessionRequise(): ResultErr {
 /** Refus métier standard d'une œuvre inconnue ou n'appartenant pas au membre. */
 function refusOeuvreIntrouvable(): ResultErr {
   return erreurMetier(CODES_ERREUR_MEMBRE.OEUVRE_INTROUVABLE, 'Cette œuvre est introuvable.');
+}
+
+/** Refus métier standard d'un document absent du Storage (message des mocks). */
+function refusFichierIntrouvable(): ResultErr {
+  return erreurMetier(
+    CODES_ERREUR_MEMBRE.FICHIER_INTROUVABLE,
+    'Ce document n’est pas disponible. Rechargez la fiche puis réessayez.',
+  );
 }
 
 /** Traduit une erreur de session Supabase en `Result` typé. */
@@ -424,8 +439,19 @@ export class SupabaseMemberRepository implements MemberRepository {
     }
   }
 
+  /**
+   * Lien temporaire de consultation d'un document (écoute audio / ouverture
+   * depuis la fiche de l'œuvre). Le bucket est déduit du chemin de stockage
+   * (`pieces/...` ou `oeuvres/...`) : un chemin inconnu est refusé, et l'URL est
+   * TOUJOURS signée par Supabase Storage (aucun lien construit par l'écran).
+   */
   async obtenirUrlFichier(chemin_stockage: string): Promise<Result<UrlFichierConsulte>> {
-    return erreurNonBranche();
+    const chemin = chemin_stockage.trim();
+    const bucket = bucketDepuisChemin(chemin);
+    if (!bucket) {
+      return refusFichierIntrouvable();
+    }
+    return getSignedUrl(bucket, chemin);
   }
 
   async creerOeuvre(entree: CreerOeuvreEntree): Promise<Result<Oeuvre>> {
@@ -443,11 +469,17 @@ export class SupabaseMemberRepository implements MemberRepository {
     return erreurNonBranche();
   }
 
+  /**
+   * Téléverse un fichier (bucket `pieces` ou `oeuvres`) avec progression réelle
+   * et annulation : contrôles locaux (format du bucket, 20 Mo) puis délégation à
+   * la couche Storage (`./storage`). Le fichier n'est « accepté » qu'après la
+   * confirmation du serveur ; aucune exception ne remonte à l'écran.
+   */
   async televerserFichier(
     entree: TeleversementEntree,
     options?: OptionsTeleversement,
   ): Promise<Result<FichierTeleverse>> {
-    return erreurNonBranche();
+    return uploadFile(entree, options);
   }
 
   /* ------------------------------------------------------- Cotisations (T) */
