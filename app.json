@@ -39,7 +39,8 @@
           "resizeMode": "contain",
           "backgroundColor": "#F5F4EF"
         }
-      ]
+      ],
+      "expo-secure-store"
     ]
   }
 }
