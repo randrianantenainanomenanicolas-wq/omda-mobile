@@ -15,6 +15,7 @@ import {
   CODE_DEVISE_MGA,
   STATUTS_OEUVRE_MODIFIABLES,
   TAILLE_MAX_FICHIER_OCTETS,
+  TYPES_MIME_ATTESTATION,
   TYPES_MIME_AUTORISES,
 } from '../../models';
 import type {
@@ -190,9 +191,14 @@ function refusDemandeCategorie(membreId: UUID, categorie_id: UUID): ResultErr | 
   return null;
 }
 
-/** Un type MIME appartient-il au bucket `oeuvres` (œuvres et attestations) ? */
+/** Un type MIME appartient-il au bucket `oeuvres` (fichier de l'œuvre) ? */
 function mimeAutoriseOeuvre(mime: TypeMime): boolean {
   return (TYPES_MIME_AUTORISES.oeuvres as readonly string[]).includes(mime);
+}
+
+/** Règle métier 8 : une attestation de diffusion est un document (pas d'audio). */
+function mimeAutoriseAttestation(mime: TypeMime): boolean {
+  return (TYPES_MIME_ATTESTATION as readonly string[]).includes(mime);
 }
 
 /**
@@ -233,12 +239,22 @@ function refusOeuvresDemande(oeuvres: OeuvreDemandeCategorieEntree[]): ResultErr
           'Un fichier dépasse la taille maximale de 20 Mo.',
         );
       }
-      if (!mimeAutoriseOeuvre(fichier.mime_type)) {
-        return erreurMetier(
-          CODES_ERREUR_MEMBRE.TYPE_FICHIER_NON_AUTORISE,
-          'Un fichier n’a pas un format accepté pour les œuvres (MP3, WAV, PDF, JPEG ou PNG).',
-        );
-      }
+    }
+
+    /** Fichier de l'œuvre : MP3, WAV, PDF, JPEG ou PNG. */
+    if (!mimeAutoriseOeuvre(oeuvre.fichier.mime_type)) {
+      return erreurMetier(
+        CODES_ERREUR_MEMBRE.TYPE_FICHIER_NON_AUTORISE,
+        'Le fichier de l’œuvre n’a pas un format accepté (MP3, WAV, PDF, JPEG ou PNG).',
+      );
+    }
+
+    /** Attestation de diffusion : un DOCUMENT uniquement (PDF, JPEG ou PNG). */
+    if (!mimeAutoriseAttestation(oeuvre.attestation.mime_type)) {
+      return erreurMetier(
+        CODES_ERREUR_MEMBRE.TYPE_FICHIER_NON_AUTORISE,
+        'L’attestation de diffusion n’accepte que les formats PDF, JPEG et PNG.',
+      );
     }
   }
   return null;

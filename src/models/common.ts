@@ -44,6 +44,13 @@ export const TYPES_MIME_AUTORISES = {
   oeuvres: ['audio/mpeg', 'audio/wav', 'application/pdf', 'image/jpeg', 'image/png'],
 } as const;
 
+/**
+ * Règle métier 8 : l'attestation de diffusion d'une œuvre est un DOCUMENT —
+ * PDF, JPEG ou PNG uniquement. L'audio (MP3 / WAV) reste réservé au fichier de
+ * l'œuvre lui-même, jamais à son attestation.
+ */
+export const TYPES_MIME_ATTESTATION = ['application/pdf', 'image/jpeg', 'image/png'] as const;
+
 /** Buckets Supabase Storage déclarés dans le schéma. */
 export const BUCKETS_STOCKAGE = ['pieces', 'oeuvres'] as const;
 export type BucketStockage = (typeof BUCKETS_STOCKAGE)[number];

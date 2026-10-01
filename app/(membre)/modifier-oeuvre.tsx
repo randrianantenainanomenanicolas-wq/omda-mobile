@@ -22,6 +22,7 @@ import {
   STATUTS_OEUVRE_MODIFIABLES,
   TAILLE_MAX_FICHIER_MO,
   TAILLE_MAX_FICHIER_OCTETS,
+  TYPES_MIME_ATTESTATION,
   TYPES_MIME_AUTORISES,
   type Categorie,
   type Oeuvre,
@@ -35,6 +36,11 @@ import type {
   MettreAJourOeuvreEntree,
 } from '../../src/services/contracts';
 import { CODES_MOCK, mockMemberRepository, mockPublicContentService } from '../../src/services/mocks';
+import {
+  AIDE_ATTESTATION_FORMATS,
+  MESSAGE_ATTESTATION_FORMAT_INVALIDE,
+  isAllowedAttestationMime,
+} from '../../src/utils';
 
 /**
  * Écran « Modifier l’œuvre » (hors onglets, ouvert depuis `fiche-oeuvre`).
@@ -180,8 +186,12 @@ function parametreTexte(valeur: string | string[] | undefined): string {
   return '';
 }
 
-/** Valide un fichier choisi : 20 Mo maximum et type MIME autorisé pour les œuvres. */
-function validerCandidat(candidat: CandidatFichier): ResultatValidation {
+/**
+ * Valide un fichier choisi : 20 Mo maximum et type MIME autorisé pour les
+ * œuvres. Une attestation de diffusion n'accepte que des DOCUMENTS (PDF, JPEG
+ * ou PNG) : l'audio est réservé au fichier de l'œuvre.
+ */
+function validerCandidat(candidat: CandidatFichier, estAttestation = false): ResultatValidation {
   const nom = candidat.nom.trim() || 'fichier';
 
   if (candidat.taille_octets > TAILLE_MAX_FICHIER_OCTETS) {
@@ -192,10 +202,12 @@ function validerCandidat(candidat: CandidatFichier): ResultatValidation {
   }
 
   const mime = deduireMime(nom, candidat.mime_fourni);
-  if (!mime) {
+  if (!mime || (estAttestation && !isAllowedAttestationMime(mime))) {
     return {
       ok: false,
-      motif: `Ce format de fichier n’est pas accepté pour ce dépôt (${LIBELLE_FORMATS}).`,
+      motif: estAttestation
+        ? MESSAGE_ATTESTATION_FORMAT_INVALIDE
+        : `Ce format de fichier n’est pas accepté pour ce dépôt (${LIBELLE_FORMATS}).`,
     };
   }
 
@@ -585,12 +597,13 @@ export default function ModifierOeuvreScreen() {
     [definirEnvoi, etatStable, memoriserStable],
   );
 
-  /** Sélection d’un document : formats et taille contrôlés AVANT tout envoi. */
+  /** Sélection d'un document : formats et taille contrôlés AVANT tout envoi. */
   const selectionnerFichier = useCallback(
     async (cible: CibleEnvoi) => {
+      const estAttestation = cible === 'attestation';
       try {
         const resultat = await DocumentPicker.getDocumentAsync({
-          type: [...TYPES_MIME_AUTORISES.oeuvres],
+          type: estAttestation ? [...TYPES_MIME_ATTESTATION] : [...TYPES_MIME_AUTORISES.oeuvres],
           multiple: false,
           copyToCacheDirectory: true,
         });
@@ -600,12 +613,15 @@ export default function ModifierOeuvreScreen() {
         const actif = resultat.assets[0];
         if (!actif) return;
 
-        const validation = validerCandidat({
-          uri: actif.uri,
-          nom: actif.name ?? 'fichier',
-          mime_fourni: actif.mimeType,
-          taille_octets: actif.size ?? 0,
-        });
+        const validation = validerCandidat(
+          {
+            uri: actif.uri,
+            nom: actif.name ?? 'fichier',
+            mime_fourni: actif.mimeType,
+            taille_octets: actif.size ?? 0,
+          },
+          estAttestation,
+        );
 
         if (!validation.ok) {
           definirEnvoi(cible, {
@@ -1001,10 +1017,7 @@ export default function ModifierOeuvreScreen() {
           statut={envoiAttestation.statut}
           nomFichier={nomFichierAffiche(envoiAttestation)}
           progression={envoiAttestation.progression}
-          message={messageEnvoi(
-            envoiAttestation,
-            `Une attestation par œuvre (règle OMDA) : remplacez-la seulement si nécessaire — ${TAILLE_MAX_FICHIER_MO} Mo maximum.`,
-          )}
+          message={messageEnvoi(envoiAttestation, AIDE_ATTESTATION_FORMATS)}
           onSelectionner={() => void selectionnerFichier('attestation')}
           onReessayer={() => reessayerEnvoi('attestation', envoiAttestation)}
           onRemplacer={() => void selectionnerFichier('attestation')}

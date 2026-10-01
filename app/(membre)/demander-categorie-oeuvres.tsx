@@ -19,6 +19,7 @@ import {
 import {
   TAILLE_MAX_FICHIER_MO,
   TAILLE_MAX_FICHIER_OCTETS,
+  TYPES_MIME_ATTESTATION,
   TYPES_MIME_AUTORISES,
   type Categorie,
   type TypeMime,
@@ -29,6 +30,11 @@ import {
   mockMemberRepository,
   mockPublicContentService,
 } from '../../src/services/mocks';
+import {
+  AIDE_ATTESTATION_FORMATS,
+  MESSAGE_ATTESTATION_FORMAT_INVALIDE,
+  isAllowedAttestationMime,
+} from '../../src/utils';
 
 /* -------------------------------------------------------------- Constantes */
 
@@ -158,8 +164,12 @@ function messageErreurEnvoi(erreur: ErreurApp): string {
   return 'Le service est momentanément indisponible. Veuillez réessayer dans un instant.';
 }
 
-/** Valide un fichier choisi : 20 Mo maximum et type MIME autorisé pour les œuvres. */
-function validerCandidat(candidat: CandidatFichier): ResultatValidation {
+/**
+ * Valide un fichier choisi : 20 Mo maximum et type MIME autorisé pour les
+ * œuvres. Une attestation de diffusion n'accepte que des DOCUMENTS (PDF, JPEG
+ * ou PNG) : l'audio est réservé au fichier de l'œuvre.
+ */
+function validerCandidat(candidat: CandidatFichier, estAttestation = false): ResultatValidation {
   const nom = candidat.nom.trim() || 'fichier';
 
   if (candidat.taille_octets > TAILLE_MAX_FICHIER_OCTETS) {
@@ -170,10 +180,12 @@ function validerCandidat(candidat: CandidatFichier): ResultatValidation {
   }
 
   const mime = deduireMime(nom, candidat.mime_fourni);
-  if (!mime) {
+  if (!mime || (estAttestation && !isAllowedAttestationMime(mime))) {
     return {
       ok: false,
-      motif: `Ce format de fichier n’est pas accepté pour ce dépôt (${LIBELLE_FORMATS}).`,
+      motif: estAttestation
+        ? MESSAGE_ATTESTATION_FORMAT_INVALIDE
+        : `Ce format de fichier n’est pas accepté pour ce dépôt (${LIBELLE_FORMATS}).`,
     };
   }
 
@@ -457,40 +469,49 @@ export default function DemanderCategorieOeuvresScreen() {
     [definirEnvoi],
   );
 
-  /** Sélection d'un document (formats autorisés du bucket `oeuvres`). */
-  const choisirDocument = useCallback(async (): Promise<CandidatFichier | null> => {
-    const typesAcceptes = TYPES_MIME_AUTORISES[BUCKET_OEUVRES] as readonly string[];
-    const resultat = await DocumentPicker.getDocumentAsync({
-      type: [...typesAcceptes],
-      multiple: false,
-      copyToCacheDirectory: true,
-    });
-    if (resultat.canceled) {
-      return null;
-    }
-    const actif = resultat.assets[0];
-    if (!actif) {
-      return null;
-    }
-    return {
-      uri: actif.uri,
-      nom: actif.name,
-      mime_fourni: actif.mimeType ?? null,
-      taille_octets: actif.size ?? 0,
-    };
-  }, []);
+  /**
+   * Sélection d'un document : formats autorisés du bucket `oeuvres`, ou formats
+   * documentaires de l'attestation de diffusion (PDF, JPEG, PNG — pas d'audio).
+   */
+  const choisirDocument = useCallback(
+    async (estAttestation = false): Promise<CandidatFichier | null> => {
+      const typesAcceptes = estAttestation
+        ? TYPES_MIME_ATTESTATION
+        : (TYPES_MIME_AUTORISES[BUCKET_OEUVRES] as readonly string[]);
+      const resultat = await DocumentPicker.getDocumentAsync({
+        type: [...typesAcceptes],
+        multiple: false,
+        copyToCacheDirectory: true,
+      });
+      if (resultat.canceled) {
+        return null;
+      }
+      const actif = resultat.assets[0];
+      if (!actif) {
+        return null;
+      }
+      return {
+        uri: actif.uri,
+        nom: actif.name,
+        mime_fourni: actif.mimeType ?? null,
+        taille_octets: actif.size ?? 0,
+      };
+    },
+    [],
+  );
 
   /** Choix d'un fichier puis envoi : contrôle 20 Mo / type MIME avant téléversement. */
   const selectionner = useCallback(
     async (cible: CibleEnvoi) => {
       try {
-        const candidat = await choisirDocument();
+        const estAttestation = cible.nature === 'attestation';
+        const candidat = await choisirDocument(estAttestation);
         if (!candidat) {
           // Annulation par l'utilisateur : la saisie en cours est conservée.
           return;
         }
 
-        const validation = validerCandidat(candidat);
+        const validation = validerCandidat(candidat, estAttestation);
         if (!validation.ok) {
           definirEnvoi(cible, {
             statut: 'erreur',
@@ -837,10 +858,7 @@ export default function DemanderCategorieOeuvresScreen() {
                 statut={oeuvre.attestation.statut}
                 nomFichier={nomFichierAffiche(oeuvre.attestation)}
                 progression={oeuvre.attestation.progression}
-                message={messageEnvoi(
-                  oeuvre.attestation,
-                  'Justificatif de diffusion : programme, affiche, article…',
-                )}
+                message={messageEnvoi(oeuvre.attestation, AIDE_ATTESTATION_FORMATS)}
                 onSelectionner={() => void selectionner({ nature: 'attestation', cle: oeuvre.cle })}
                 onReessayer={() => void reessayer({ nature: 'attestation', cle: oeuvre.cle })}
                 onRemplacer={() => void remplacer({ nature: 'attestation', cle: oeuvre.cle })}
