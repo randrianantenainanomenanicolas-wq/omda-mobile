@@ -107,8 +107,7 @@ export interface MemberRepository {
 
   /**
    * Lien TEMPORAIRE de consultation d'un document déjà stocké : écoute dans
-   * l'application (œuvre audio), ouverture dans une application du téléphone ou
-   * partage.
+   * l'application (œuvre audio uniquement).
    *
    * ⚠️ `chemin_stockage` est un chemin dans un bucket PRIVÉ, jamais un lien :
    * seul le service sait le transformer en ressource accessible (URL signée côté
@@ -283,12 +282,13 @@ export type SoumettreOeuvreEntree = {
 };
 
 /**
- * Lien temporaire de consultation d'un document stocké (écoute, ouverture,
- * partage). Le chemin de stockage est un chemin de bucket privé : il ne suffit
- * pas à ouvrir le document, d'où ce passage obligatoire par le service.
+ * Lien temporaire de consultation d'un document stocké (écoute dans
+ * l'application). Le chemin de stockage est un chemin de bucket privé : il ne
+ * suffit pas à rendre le document consultable, d'où ce passage obligatoire par
+ * le service.
  */
 export type UrlFichierConsulte = {
-  /** Lien à confier au lecteur audio, à `Linking` ou à la feuille de partage. */
+  /** Lien à confier au lecteur audio intégré. */
   url: string;
   /** Chemin de stockage d'origine (ressource consultée). */
   chemin_stockage: string;

@@ -554,7 +554,7 @@ export class MockMemberRepository implements MemberRepository {
 
   /**
    * Lien temporaire de consultation d'un document (œuvre ou attestation) :
-   * écoute audio, ouverture dans une application du téléphone ou partage.
+   * écoute audio dans l'application.
    *
    * Aucun contrôle d'appartenance n'est possible sur un chemin de stockage : le
    * futur service réel ne signera un lien QUE si le fichier appartient au membre

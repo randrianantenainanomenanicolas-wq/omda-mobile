@@ -30,9 +30,7 @@
     },
     "plugins": [
       "expo-router",
-      "expo-sharing",
       "expo-audio",
-      "expo-web-browser",
       [
         "expo-splash-screen",
         {

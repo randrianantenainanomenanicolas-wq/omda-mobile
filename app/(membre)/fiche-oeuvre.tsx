@@ -53,16 +53,14 @@ import { estFichierAudio } from '../../src/utils';
  *   absente s'affiche « — », aucune section n'est masquée pour autant ;
  * - l'« Attestation de diffusion » (règle métier 8) est chargée EN PARALLÈLE de
  *   l'œuvre (`listerAttestationsOeuvre`) et présentée en LECTURE SEULE : pastille
- *   « Ajoutée » / « Manquante » + nom du fichier, sans aucun bouton d'ouverture ni
- *   de partage ;
+ *   « Ajoutée » / « Manquante » + nom du fichier, sans aucun bouton d'ouverture ;
  * - ces deux sections ne dépendent PAS du type de fichier (un PDF, une image et un
  *   MP3 affichent les mêmes informations) ;
  * - seule l'écoute intégrée reste proposée (`AudioPreview`) : « Écouter l'œuvre »
  *   demande un lien temporaire au service puis joue la piste dans l'application ;
- *   la fiche n'ouvre AUCUN document avec une autre application et ne propose
- *   AUCUNE action de partage — un fichier qui n'est pas audio affiche « Aperçu
- *   audio indisponible pour ce format. » et un échec d'écoute affiche sa cause
- *   exacte avec un bouton « Réessayer » ;
+ *   la fiche n'ouvre AUCUN document avec une autre application — un fichier qui
+ *   n'est pas audio affiche « Aperçu audio indisponible pour ce format. » et un
+ *   échec d'écoute affiche sa cause exacte avec un bouton « Réessayer » ;
  * - le lien d'écoute est TEMPORAIRE et vient TOUJOURS du service
  *   (`obtenirUrlFichier`) : l'écran ne construit jamais de lien depuis un chemin
  *   de stockage (bucket privé), et ne le prépare qu'à la demande de l'utilisateur.
@@ -438,7 +436,7 @@ export default function FicheOeuvreScreen() {
         <Text className="text-lg font-bold text-omda-black">Attestation de diffusion</Text>
         <Text className="mt-1 text-sm text-omda-textGray">
           Document exigé pour chaque œuvre (au moins une attestation) : informations en lecture
-          seule, aucune ouverture ni partage depuis cette fiche.
+          seule depuis cette fiche.
         </Text>
 
         {erreurAttestations ? (

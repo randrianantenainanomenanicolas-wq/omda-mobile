@@ -687,8 +687,8 @@ export async function simulerTeleversement(
 
   /**
    * Le mock retient l'URI locale du fichier choisi : c'est elle que le service
-   * renverra pour ÉCOUTER l'œuvre dans l'application (la fiche n'ouvre ni ne
-   * partage aucun document).
+   * renverra pour ÉCOUTER l'œuvre dans l'application (la fiche n'ouvre aucun
+   * document avec une autre application).
    */
   urisLocalesFichiers.set(entree.chemin_stockage, entree.fichier_uri);
 
@@ -720,7 +720,7 @@ export const BASE_URL_STOCKAGE_MOCK = 'https://mock.omda.mg/storage';
  *
  * - chemin déjà absolu (`file://`, `content://`, `https://`) → renvoyé tel quel ;
  * - fichier téléversé dans la session → URI locale d'origine (il est donc
- *   réellement lisible et partageable en démonstration) ;
+ *   réellement audible en démonstration) ;
  * - document des jeux de test → URL signée factice sur le bucket simulé, même
  *   convention que les URL de téléversement de `MockCandidateApi`.
  *

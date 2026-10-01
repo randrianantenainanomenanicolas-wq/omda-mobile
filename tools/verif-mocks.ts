@@ -773,7 +773,7 @@ async function scenarioMembreOeuvres(): Promise<void> {
     'oeuvres/brouillons/poemes-cote.pdf',
   );
   verifier(
-    'lien d’un fichier téléversé : URI locale de la session (écoute et partage réels)',
+    'lien d’un fichier téléversé : URI locale de la session (écoute réelle)',
     urlFichierTeleverse.ok && urlFichierTeleverse.valeur.url === 'file:///tmp/poemes-cote.pdf',
   );
 
