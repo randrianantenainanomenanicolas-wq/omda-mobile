@@ -1,10 +1,15 @@
 # OMDA — Contrat REST de l'API Candidat (proposition)
 
-Version : 1.0 — cible : API Node/Express consommée par l'application mobile pour le
+Version : 1.1 — cible : API Node/Express consommée par l'application mobile pour le
 parcours **visiteur / candidat** (utilisateur SANS compte).
 
+> **v1.1** — implémenté côté mobile par `src/services/http/HttpCandidateApi.ts`
+> (étape 19) : §5.3 adapté au dépôt **préalable** à la création du dossier ;
+> contrôles client ajoutés au §9. Le fond n'a pas changé : **Mobile Money
+> (MVola) reste le seul mode de paiement, aucun virement n'existe.**
+
 > Ce document décrit le contrat HTTP que l'implémentation `HttpCandidateApi`
-> devra respecter. Il correspond au contrat TypeScript
+> (étape 19) respecte. Il correspond au contrat TypeScript
 > `src/services/contracts/candidateApi.ts` (`CandidateApi`).
 >
 > **Hors périmètre** : l'espace membre (auth + données) passe par **Supabase**
@@ -150,13 +155,22 @@ une seule fois** ; l'app le conserve (stockage local) et l'affiche à l'écran L
 
 ### 5.3 Téléverser un fichier (pièce, œuvre, attestation)
 
-`POST /v1/demandes/{numero_dossier}/fichiers` — `multipart/form-data`
+`POST /v1/fichiers` — `multipart/form-data`
+
+> **v1.1** : le dépôt est **préalable à la création du dossier** dans
+> l'application (étape « Documents + œuvres » = étape 3, alors que `POST
+> /v1/demandes` n'est appelé qu'à l'étape 4) et le contrat mobile
+> `televerserFichier` ne reçoit ni `numero_dossier` ni `code_suivi` : l'endpoint
+> n'est donc plus rattaché à une demande. Le client joint `X-Code-Suivi` s'il
+> connaît déjà un dossier ; ce dépôt étant le seul appelé sans identité de
+> dossier, le serveur doit y appliquer limite de taille, formats MIME et débit.
 
 | Part | Contenu |
 |---|---|
 | `fichier` | binaire (≤ **20 Mo**) |
 | `bucket` | `pieces` \| `oeuvres` |
-| `type` | pour `pieces` : `PHOTO` \| `CIN` \| `ACTE_NAISSANCE` \| `CERTIFICAT_RESIDENCE` \| `AUTORISATION_PARENTALE` \| `AUTRE` |
+| `chemin_stockage` | chemin souhaité dans le bucket (ex. `pieces/PHOTO/photo.jpg`) ; le serveur peut le préfixer |
+| `type` | facultatif, pour `pieces` : `PHOTO` \| `CIN` \| `ACTE_NAISSANCE` \| `CERTIFICAT_RESIDENCE` \| `AUTORISATION_PARENTALE` \| `AUTRE` |
 | `oeuvre_id` | facultatif (rattachement à une œuvre) |
 
 MIME autorisés par bucket (identiques au schéma) :
@@ -328,6 +342,11 @@ Règles :
 
 > La clé de polling est la **référence interne** (`PAI-2026-000742`), seule
 > valeur exposée au candidat côté `obtenirEtatPaiement` du contrat mobile.
+>
+> `HttpCandidateApi` mémorise le couple dossier en cours (§1) pour joindre
+> `X-Code-Suivi` à cet appel ; sans contexte (application redémarrée), la
+> requête part avec la seule référence et le serveur peut alors répondre
+> `401 CODE_SUIVI_INVALIDE`.
 
 `200 OK` → même objet que 5.7 avec les champs complétés :
 
@@ -396,7 +415,7 @@ liste ; l'UI ne codifie aucun montant, opérateur ou tarif (règle AI_RULES).
 | `creerDemande` | `POST /v1/demandes` (§5.1) |
 | `mettreAJourDemande` | `PATCH /v1/demandes/{numero_dossier}` (§5.2) |
 | `soumettreDemande` | `POST /v1/demandes/{numero_dossier}/envoi` (§5.4) |
-| `televerserFichier` | `POST /v1/demandes/{numero_dossier}/fichiers` (§5.3) |
+| `televerserFichier` | `POST /v1/fichiers` (§5.3) |
 | `suivreDemande` | `GET /v1/suivi/{numero_dossier}` (§5.5) |
 | `obtenirOptionsPaiement` | `GET /v1/paiements/options/{numero_dossier}` (§5.6) |
 | `initierPaiement` | `POST /v1/paiements` (§5.7) |
@@ -431,7 +450,20 @@ liste ; l'UI ne codifie aucun montant, opérateur ou tarif (règle AI_RULES).
 - tous les endpoints répondent JSON ; toute réponse hors contrat (champ manquant,
   type incohérent) doit produire une erreur `serveur` côté app — **jamais** un
   écran « prêt » affiché sur des données inconnues ;
-- versions : `/v1` reste stable ; toute rupture de contrat impose `/v2`.
+- versions : `/v1` reste stable ; toute rupture de contrat impose `/v2` ;
+- `HttpCandidateApi` (étape 19) impose côté client : délai de **15 s** par
+  requête JSON et **120 s** par téléversement (dépassement ⇒ `reseau`) ;
+  enveloppe §2 ⇒ `metier` ; 5xx, corps illisible, champ absent ou ENUM inconnu
+  ⇒ `serveur` ; contrôles à la lecture : `REJETEE` exige `motif_rejet`,
+  `VALIDEE` exige `paiement_du`, `REUSSI` exige `date_confirmation`,
+  `ECHEC_*`/`REJETE` exige `motif_echec`, `mode` doit valoir `MOBILE_MONEY` et
+  `operateur` `MVOLA` (toute autre valeur, y compris un virement, est refusée),
+  un opérateur `actif = false` est écarté de la réponse ;
+- `Idempotency-Key` (UUID v4) envoyée sur `POST /v1/paiements` et
+  `POST /v1/demandes/{numero_dossier}/envoi` ;
+- bascule : `MockCandidateApi` reste le **défaut** ; seule la valeur exacte
+  `EXPO_PUBLIC_USE_MOCKS=false` instancie `HttpCandidateApi`
+  (`src/services/factory.ts`).
 
 > **Périmètre** : ce contrat couvre uniquement le parcours candidat/visiteur.
 > Le reste (membre connecté) passe par Supabase : `AuthService` (Supabase Auth)
