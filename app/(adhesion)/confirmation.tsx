@@ -1,7 +1,7 @@
 import * as Clipboard from 'expo-clipboard';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Share, Text, View } from 'react-native';
+import { Text, View } from 'react-native';
 
 import {
   Button,
@@ -32,10 +32,10 @@ type InformationsDossier = {
   delai_indicatif_heures: number | null;
 };
 
-/** Actions proposées par l'écran (copier / partager / sauvegarder). */
-type NomAction = 'copie' | 'partage' | 'sauvegarde';
+/** Actions proposées par l'écran : copier le dossier, le conserver sur le téléphone. */
+type NomAction = 'copie' | 'sauvegarde';
 
-/** Retour d'action affiché sous les boutons (copie, partage, sauvegarde). */
+/** Retour d'action affiché sous les boutons (copie, sauvegarde). */
 type RetourAction = {
   variante: VarianteBanner;
   message: string;
@@ -101,7 +101,7 @@ function formaterHorodatage(horodatage: string | null): string {
   return `${jour}/${mois}/${date.getFullYear()}`;
 }
 
-/** Texte copié/partagé : numéro de dossier + code de suivi, prêts à conserver. */
+/** Texte copié : numéro de dossier + code de suivi, prêts à conserver. */
 function texteDossier(informations: InformationsDossier): string {
   return [
     'OMDA — Demande d’adhésion',
@@ -122,8 +122,9 @@ function texteDossier(informations: InformationsDossier): string {
  *
  * Contenu imposé :
  * - numéro de dossier et code de suivi EN CLAIR ;
- * - actions « copier » (`expo-clipboard`), « partager » (`Share`) et
- *   « sauvegarder » (stockage local du téléphone) ;
+ * - actions « copier » (`expo-clipboard`) et « sauvegarder » (stockage local du
+ *   téléphone) : le texte est copié ou conservé sur l'appareil, jamais remis à
+ *   une autre application ;
  * - les 3 messages obligatoires : conserver les informations, délai indicatif
  *   (valeur renvoyée par le service), aucun paiement demandé pour le moment.
  *
@@ -231,30 +232,6 @@ export default function ConfirmationScreen() {
     }
   }, [informations]);
 
-  /** Action « Partager » : partage système (SMS, e-mail, notes…). */
-  const partager = useCallback(async () => {
-    if (!informations) {
-      return;
-    }
-    try {
-      const resultat = await Share.share({
-        title: 'OMDA — informations de ma demande d’adhésion',
-        message: texteDossier(informations),
-      });
-      if (resultat.action === Share.sharedAction) {
-        setRetourAction({ variante: 'info', message: 'Informations partagées.' });
-      }
-    } catch (erreur) {
-      console.warn('[Confirmation] Partage impossible :', erreur);
-      setRetourAction({
-        variante: 'error',
-        message:
-          'Le partage n’est pas disponible sur cet appareil. Utilisez « Copier les informations ».',
-        action: 'partage',
-      });
-    }
-  }, [informations]);
-
   /**
    * Action « Sauvegarder » : conservation sur le téléphone (AsyncStorage).
    * Le dossier est déjà enregistré après l'envoi : cette action permet de le
@@ -294,13 +271,9 @@ export default function ConfirmationScreen() {
         void copier();
         return;
       }
-      if (nom === 'partage') {
-        void partager();
-        return;
-      }
       void sauvegarder();
     },
-    [copier, partager, sauvegarder],
+    [copier, sauvegarder],
   );
 
   /* --------------------------------------------------------------- Rendu */
@@ -416,7 +389,7 @@ export default function ConfirmationScreen() {
         />
       </View>
 
-      {/* Retour des actions copier / partager / sauvegarder */}
+      {/* Retour des actions copier / sauvegarder */}
       {retourAction ? (
         <View className="mt-4">
           <InfoBanner
@@ -428,20 +401,13 @@ export default function ConfirmationScreen() {
         </View>
       ) : null}
 
-      {/* Actions : copier / partager / sauvegarder */}
+      {/* Actions : copier / sauvegarder */}
       <View className="mt-8 gap-3">
         <Button
           libelle="Copier les informations"
           icone="copy"
           pleineLargeur
           onPress={() => void copier()}
-        />
-        <Button
-          libelle="Partager"
-          icone="share-nodes"
-          variante="secondary"
-          pleineLargeur
-          onPress={() => void partager()}
         />
         <Button
           libelle="Sauvegarder sur mon téléphone"
