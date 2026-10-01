@@ -742,4 +742,11 @@ drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created
   after insert on auth.users
   for each row execute function public.handle_new_user();
+
+alter table public.attestation_diffusion
+  drop constraint if exists attestation_diffusion_mime_chk;
+
+alter table public.attestation_diffusion
+  add constraint attestation_diffusion_mime_chk
+  check (mime_type in ('application/pdf','image/jpeg','image/png'));
 ```
