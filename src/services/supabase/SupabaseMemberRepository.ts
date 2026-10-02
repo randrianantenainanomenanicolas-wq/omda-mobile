@@ -1,5 +1,5 @@
 /**
- * `MemberRepository` réel (Supabase : Auth + DB + Storage) — étapes 17 à 20.
+ * `MemberRepository` réel (Supabase : Auth + DB + Storage) — étapes 17 à 23.
  *
  * Étape 20 — STORAGE branché : `televerserFichier` (envoi NATIF avec progression
  * et annulation) et `obtenirUrlFichier` (lien de consultation SIGNÉ pour les
@@ -18,8 +18,23 @@
  * - Cotisations (T)   : `cotisation`
  * - Notifications (V) : `notification` (+ annonces globales)
  *
- * Les ÉCRITURES (profil, catégories, œuvres, paiements, notifications) refusent
- * encore proprement via `erreurNonBranche()` : aucun écran ne plante en mode réel.
+ * Étape 23 — ÉCRITURES DES ŒUVRES ET DES CATÉGORIES branchées (validations,
+ * codes, messages et ordre identiques aux mocks, écritures RESTREINTES au
+ * membre connecté — RLS en garde-fou final) :
+ *
+ * - Œuvres (Q, R, S) : `creerOeuvre` (brouillon `BROUILLON`),
+ *   `mettreAJourOeuvre` (`STATUTS_OEUVRE_MODIFIABLES` seulement, champs
+ *   transmis seuls), `soumettreOeuvre` (`ENVOYEE` + `date_soumission`) ;
+ * - Attestation (règle métier 8) : remplacement en UPsert sur
+ *   `attestation_diffusion` — INSERT si aucune ligne, UPDATE sinon,
+ *   JAMAIS de DELETE ;
+ * - Catégories (règle métier 9) : `demanderCategorieSupplementaireAvecOeuvres`
+ *   (appartenance créée ou rouverte au statut `EN_ATTENTE`) et
+ *   `annulerDemandeCategorie` (`EN_ATTENTE` ⇒ `ANNULEE`).
+ *
+ * Restent refusés proprement via `erreurNonBranche()` (aucun écran ne plante
+ * en mode réel) : `demanderCategorieSupplementaire` (variante simple, sans
+ * écran), `mettreAJourProfil`, les paiements et le marquage des notifications.
  *
  * Le mode mock reste le défaut : `EXPO_PUBLIC_USE_MOCKS` non passé à `false`
  * n'instancie jamais cette classe (cf. `docs/BRANCHEMENT.md`).
@@ -36,10 +51,18 @@ import type {
   Notification,
   Oeuvre,
   Paiement,
+  TypeMime,
   UUID,
   Utilisateur,
 } from '../../models';
 import {
+  STATUTS_OEUVRE_MODIFIABLES,
+  TAILLE_MAX_FICHIER_OCTETS,
+  TYPES_MIME_ATTESTATION,
+  TYPES_MIME_AUTORISES,
+} from '../../models';
+import {
+  CODES_ERREUR_CANDIDAT,
   CODES_ERREUR_MEMBRE,
   erreurMetier,
   erreurReseau,
@@ -48,6 +71,7 @@ import {
   type CategoriesMembre,
   type CreerOeuvreEntree,
   type DemandeCategorieOeuvresEntree,
+  type FichierDepose,
   type FichierTeleverse,
   type InitierPaiementMembreEntree,
   type ListerCotisationsEntree,
@@ -57,6 +81,7 @@ import {
   type MiseAJourProfilEntree,
   type MettreAJourOeuvreEntree,
   type OptionsTeleversement,
+  type OeuvreDemandeCategorieEntree,
   type ProfilMembre,
   type Result,
   type ResultErr,
@@ -244,6 +269,151 @@ async function categoriesDuMembreReel(membreId: UUID): Promise<Result<Categories
   }
 }
 
+/* ------------------------------------------------- Écritures (étape 23) */
+
+/**
+ * Code identique à `CODES_MOCK.OEUVRE_NON_MODIFIABLE` (`docs/DONNEES_TEST.md`)
+ * : les mocks ne sont PAS importés ici, pour ne jamais embarquer leur état.
+ */
+const CODE_OEUVRE_NON_MODIFIABLE = 'OEUVRE_NON_MODIFIABLE';
+
+/** Nombre minimum d'œuvres d'une demande de catégorie (règle métier 9 étendue). */
+const NOMBRE_MINIMUM_OEUVRES_CATEGORIE = 2;
+
+/** Un type MIME appartient-il au bucket `oeuvres` (fichier de l'œuvre) ? */
+function mimeAutoriseOeuvre(mime: TypeMime): boolean {
+  return (TYPES_MIME_AUTORISES.oeuvres as readonly string[]).includes(mime);
+}
+
+/** Règle métier 8 : une attestation de diffusion est un DOCUMENT (jamais d'audio). */
+function mimeAutoriseAttestation(mime: TypeMime): boolean {
+  return (TYPES_MIME_ATTESTATION as readonly string[]).includes(mime);
+}
+
+/**
+ * Exigences de la règle métier 9 étendue : AU MOINS 2 œuvres, chacune avec un
+ * titre, un fichier téléversé et son attestation de diffusion (règle métier 8).
+ * Revalide côté « serveur » ce que l'écran contrôle déjà (20 Mo, MIME) — codes
+ * et messages identiques à `refusOeuvresDemande` des mocks.
+ * Retourne `null` lorsque la demande peut être déposée.
+ */
+function refusOeuvresDemandeReel(oeuvres: OeuvreDemandeCategorieEntree[]): ResultErr | null {
+  if (oeuvres.length < NOMBRE_MINIMUM_OEUVRES_CATEGORIE) {
+    return erreurMetier(
+      CODES_ERREUR_MEMBRE.OEUVRE_MINIMUM_REQUIS,
+      'Joignez au moins 2 œuvres à votre demande de catégorie.',
+    );
+  }
+
+  for (const oeuvre of oeuvres) {
+    const titre = oeuvre.titre.trim();
+    if (!titre) {
+      return erreurMetier(CODES_ERREUR_MEMBRE.OEUVRE_INCOMPLETE, 'Chaque œuvre doit être titrée.');
+    }
+    if (!oeuvre.fichier.chemin_stockage) {
+      return erreurMetier(
+        CODES_ERREUR_MEMBRE.OEUVRE_INCOMPLETE,
+        `Le fichier de l’œuvre « ${titre} » est manquant.`,
+      );
+    }
+    if (!oeuvre.attestation.chemin_stockage) {
+      return erreurMetier(
+        CODES_ERREUR_MEMBRE.ATTESTATION_MANQUANTE,
+        `Joignez une attestation de diffusion à l’œuvre « ${titre} ».`,
+      );
+    }
+
+    for (const fichier of [oeuvre.fichier, oeuvre.attestation]) {
+      if (fichier.taille_octets > TAILLE_MAX_FICHIER_OCTETS) {
+        return erreurMetier(
+          CODES_ERREUR_MEMBRE.FICHIER_TROP_VOLUMINEUX,
+          'Un fichier dépasse la taille maximale de 20 Mo.',
+        );
+      }
+    }
+
+    /** Fichier de l'œuvre : MP3, WAV, PDF, JPEG ou PNG. */
+    if (!mimeAutoriseOeuvre(oeuvre.fichier.mime_type)) {
+      return erreurMetier(
+        CODES_ERREUR_MEMBRE.TYPE_FICHIER_NON_AUTORISE,
+        'Le fichier de l’œuvre n’a pas un format accepté (MP3, WAV, PDF, JPEG ou PNG).',
+      );
+    }
+
+    /** Attestation de diffusion : un DOCUMENT uniquement (PDF, JPEG ou PNG). */
+    if (!mimeAutoriseAttestation(oeuvre.attestation.mime_type)) {
+      return erreurMetier(
+        CODES_ERREUR_MEMBRE.TYPE_FICHIER_NON_AUTORISE,
+        'L’attestation de diffusion n’accepte que les formats PDF, JPEG et PNG.',
+      );
+    }
+  }
+  return null;
+}
+
+/**
+ * Écriture n'ayant affecté AUCUNE ligne : la ligne a disparu ou les politiques
+ * RLS l'ont filtrée (PostgREST ignore silencieusement une mise à jour filtrée)
+ * — même classification qu'un refus d'accès PostgREST (`classerErreurRequete`).
+ */
+function refusEcritureSansLigne(): ResultErr {
+  return sessionRequise();
+}
+
+/**
+ * Remplace l'attestation de diffusion d'une œuvre — UPsert sur
+ * `attestation_diffusion` : `UPDATE` de la ligne existante la plus ancienne,
+ * `INSERT` si l'œuvre n'en a pas encore, JAMAIS de `DELETE` (règle métier 8 :
+ * une œuvre garde toujours une attestation ; l'application ne propose que le
+ * remplacement). `null` = succès, refus typé sinon. L'appartenance de l'œuvre
+ * au membre connecté est déjà vérifiée par l'appelant et par la politique
+ * `attestation_select_owner_or_staff`.
+ */
+async function remplacerAttestationReelle(
+  oeuvreId: UUID,
+  fichier: FichierDepose,
+): Promise<ResultErr | null> {
+  try {
+    const client = getSupabaseClient();
+    const charge: Record<string, unknown> = {
+      chemin_stockage: fichier.chemin_stockage,
+      mime_type: fichier.mime_type,
+      taille_octets: fichier.taille_octets,
+    };
+
+    const existantes = await client
+      .from('attestation_diffusion')
+      .select('id')
+      .eq('oeuvre_id', oeuvreId)
+      .order('created_at', { ascending: true })
+      .limit(1);
+    if (existantes.error) {
+      return classerErreurRequete(existantes.error);
+    }
+    const premiere = (existantes.data ?? [])[0] as { id: UUID } | undefined;
+
+    const reponse = premiere
+      ? await client
+          .from('attestation_diffusion')
+          .update(charge)
+          .eq('id', premiere.id)
+          .select('id')
+      : await client
+          .from('attestation_diffusion')
+          .insert({ oeuvre_id: oeuvreId, ...charge })
+          .select('id');
+    if (reponse.error) {
+      return classerErreurRequete(reponse.error);
+    }
+    if ((reponse.data ?? []).length === 0) {
+      return refusEcritureSansLigne();
+    }
+    return null;
+  } catch (cause) {
+    return erreurReseau(texteDe(cause));
+  }
+}
+
 export class SupabaseMemberRepository implements MemberRepository {
   /* ------------------------------------------------------------ Profil (U) */
 
@@ -273,18 +443,183 @@ export class SupabaseMemberRepository implements MemberRepository {
     return categoriesDuMembreReel(contexte.valeur.membre.id);
   }
 
+  /**
+   * Variante simple (sans œuvres), conservée pour compatibilité : aucun écran
+   * ne l'appelle — le parcours de l'application passe par
+   * `demanderCategorieSupplementaireAvecOeuvres`.
+   */
   async demanderCategorieSupplementaire(categorie_id: UUID): Promise<Result<MembreCategorie>> {
     return erreurNonBranche();
   }
 
+  /**
+   * Demande AVEC œuvres (règle métier 9 étendue) : mêmes refus et mêmes
+   * messages que les mocks, dans le même ordre — catégorie active du
+   * référentiel et non déjà `ACTIVE` / `EN_ATTENTE` (`CATEGORIE_*`), puis
+   * exigences sur les œuvres (≥ 2, titre, fichier, attestation, 20 Mo, MIME).
+   *
+   * Écriture RLS-safe : l'appartenance est créée — ou rouverte après `ANNULEE`
+   * / `REJETEE` — au statut `EN_ATTENTE`, avec `date_activation` portant
+   * l'horodatage de la demande et un filtre explicite sur le `membre_id` du
+   * membre connecté ; `ACTIVE` n'est JAMAIS appliqué localement (décision d'un
+   * agent OMDA). Conformément aux mocks, aucune ligne `oeuvre` n'est créée pour
+   * les œuvres jointes : leur rattachement appartient à un agent OMDA.
+   */
   async demanderCategorieSupplementaireAvecOeuvres(
     entree: DemandeCategorieOeuvresEntree,
   ): Promise<Result<MembreCategorie>> {
-    return erreurNonBranche();
+    const contexte = await contexteMembreReel();
+    if (!contexte.ok) {
+      return contexte;
+    }
+    try {
+      const client = getSupabaseClient();
+      const membreId = contexte.valeur.membre.id;
+
+      /** Catégorie présente et `actif = true` au référentiel (lecture publique). */
+      const reponseCategorie = await client
+        .from('categorie')
+        .select('id')
+        .eq('id', entree.categorie_id)
+        .eq('actif', true)
+        .maybeSingle();
+      if (reponseCategorie.error) {
+        return classerErreurRequete(reponseCategorie.error);
+      }
+      if (!reponseCategorie.data) {
+        return erreurMetier(
+          CODES_ERREUR_MEMBRE.CATEGORIE_INDISPONIBLE,
+          'Cette catégorie n’est pas proposée actuellement.',
+        );
+      }
+
+      /** Appartenance éventuelle du membre pour cette catégorie. */
+      const reponseAppartenance = await client
+        .from('membre_categorie')
+        .select('*')
+        .eq('membre_id', membreId)
+        .eq('categorie_id', entree.categorie_id)
+        .maybeSingle();
+      if (reponseAppartenance.error) {
+        return classerErreurRequete(reponseAppartenance.error);
+      }
+      const existante = reponseAppartenance.data as MembreCategorie | null;
+      if (existante?.statut === 'EN_ATTENTE') {
+        return erreurMetier(
+          CODES_ERREUR_MEMBRE.CATEGORIE_DEJA_DEMANDEE,
+          'Une demande est déjà en attente pour cette catégorie.',
+        );
+      }
+      if (existante && existante.statut !== 'ANNULEE' && existante.statut !== 'REJETEE') {
+        return erreurMetier(
+          CODES_ERREUR_MEMBRE.CATEGORIE_DEJA_ENREGISTREE,
+          'Cette catégorie figure déjà dans votre profil.',
+        );
+      }
+
+      /** Œuvres jointes : revalidées côté « serveur » (règles métier 8 et 9). */
+      const refusOeuvres = refusOeuvresDemandeReel(entree.oeuvres);
+      if (refusOeuvres) {
+        return refusOeuvres;
+      }
+
+      const horodatage = new Date().toISOString();
+      if (existante) {
+        /** Réouverture d'une demande annulée ou refusée : statut + horodatage. */
+        const reponse = await client
+          .from('membre_categorie')
+          .update({ statut: 'EN_ATTENTE', date_activation: horodatage })
+          .eq('id', existante.id)
+          .eq('membre_id', membreId)
+          .select('*');
+        if (reponse.error) {
+          return classerErreurRequete(reponse.error);
+        }
+        const [appartenance] = reponse.data ?? [];
+        if (!appartenance) {
+          return refusEcritureSansLigne();
+        }
+        return ok(appartenance as MembreCategorie);
+      }
+
+      const reponse = await client
+        .from('membre_categorie')
+        .insert({
+          membre_id: membreId,
+          categorie_id: entree.categorie_id,
+          statut: 'EN_ATTENTE',
+          date_activation: horodatage,
+        })
+        .select('*');
+      if (reponse.error) {
+        return classerErreurRequete(reponse.error);
+      }
+      const [appartenance] = reponse.data ?? [];
+      if (!appartenance) {
+        return refusEcritureSansLigne();
+      }
+      return ok(appartenance as MembreCategorie);
+    } catch (cause) {
+      return erreurReseau(texteDe(cause));
+    }
   }
 
+  /**
+   * Annulation d'une demande `EN_ATTENTE` (règle métier 9) : l'appartenance
+   * passe au statut `ANNULEE` — enregistrement conservé, jamais supprimé — avec
+   * un filtre explicite sur le `membre_id` du membre connecté. Une catégorie
+   * `ACTIVE` ou déjà traitée reste du ressort de l'agent OMDA
+   * (`DEMANDE_NON_ANNUABLE`). Les œuvres jointes n'étant pas stockées en base
+   * (aucune ligne `oeuvre` créée), rien n'est à retirer ici.
+   */
   async annulerDemandeCategorie(membre_categorie_id: UUID): Promise<Result<MembreCategorie>> {
-    return erreurNonBranche();
+    const contexte = await contexteMembreReel();
+    if (!contexte.ok) {
+      return contexte;
+    }
+    try {
+      const client = getSupabaseClient();
+      const membreId = contexte.valeur.membre.id;
+      const reponseAppartenance = await client
+        .from('membre_categorie')
+        .select('*')
+        .eq('id', membre_categorie_id)
+        .eq('membre_id', membreId)
+        .maybeSingle();
+      if (reponseAppartenance.error) {
+        return classerErreurRequete(reponseAppartenance.error);
+      }
+      const appartenance = reponseAppartenance.data as MembreCategorie | null;
+      if (!appartenance) {
+        return erreurMetier(
+          CODES_ERREUR_MEMBRE.DEMANDE_CATEGORIE_INTROUVABLE,
+          'Cette demande de catégorie est introuvable.',
+        );
+      }
+      if (appartenance.statut !== 'EN_ATTENTE') {
+        return erreurMetier(
+          CODES_ERREUR_MEMBRE.DEMANDE_NON_ANNUABLE,
+          'Seule une demande encore en attente peut être annulée.',
+        );
+      }
+
+      const reponse = await client
+        .from('membre_categorie')
+        .update({ statut: 'ANNULEE', date_activation: new Date().toISOString() })
+        .eq('id', appartenance.id)
+        .eq('membre_id', membreId)
+        .select('*');
+      if (reponse.error) {
+        return classerErreurRequete(reponse.error);
+      }
+      const [annulee] = reponse.data ?? [];
+      if (!annulee) {
+        return refusEcritureSansLigne();
+      }
+      return ok(annulee as MembreCategorie);
+    } catch (cause) {
+      return erreurReseau(texteDe(cause));
+    }
   }
 
   async mettreAJourProfil(entree: MiseAJourProfilEntree): Promise<Result<ProfilMembre>> {
@@ -454,19 +789,202 @@ export class SupabaseMemberRepository implements MemberRepository {
     return getSignedUrl(bucket, chemin);
   }
 
+  /**
+   * Brouillon d'œuvre : aucun envoi, aucun paiement (règle métier 4). Ligne
+   * créée pour le membre connecté (`membre_id` lié à `auth.uid()`, politique
+   * `oeuvre_insert_owner_or_staff`), statut `BROUILLON` par défaut au schéma.
+   */
   async creerOeuvre(entree: CreerOeuvreEntree): Promise<Result<Oeuvre>> {
-    return erreurNonBranche();
+    const contexte = await contexteMembreReel();
+    if (!contexte.ok) {
+      return contexte;
+    }
+    try {
+      const reponse = await getSupabaseClient()
+        .from('oeuvre')
+        .insert({
+          membre_id: contexte.valeur.membre.id,
+          categorie_id: entree.categorie_id,
+          titre: entree.titre.trim(),
+          description: entree.description ?? null,
+          annee: entree.annee ?? null,
+          statut: 'BROUILLON',
+        })
+        .select('*');
+      if (reponse.error) {
+        return classerErreurRequete(reponse.error);
+      }
+      const [oeuvre] = reponse.data ?? [];
+      if (!oeuvre) {
+        return refusEcritureSansLigne();
+      }
+      return ok(oeuvre as Oeuvre);
+    } catch (cause) {
+      return erreurReseau(texteDe(cause));
+    }
   }
 
+  /**
+   * Correction d'une œuvre encore modifiable — STRICTEMENT
+   * `STATUTS_OEUVRE_MODIFIABLES` (`BROUILLON`, `ENVOYEE`,
+   * `EN_COURS_DE_VALIDATION`), même refus `OEUVRE_NON_MODIFIABLE` et mêmes
+   * messages que les mocks. Seuls les champs TRANSMIS sont mis à jour (le
+   * statut, la date de soumission et le motif de rejet ne sont JAMAIS touchés) ;
+   * `fichier` remplace le document déposé et `attestation` remplace
+   * l'attestation (upsert, jamais de suppression) ; aucune correction ne
+   * déclenche de paiement. Écriture filtrée par `membre_id` du membre connecté.
+   */
   async mettreAJourOeuvre(
     oeuvre_id: UUID,
     entree: MettreAJourOeuvreEntree,
   ): Promise<Result<Oeuvre>> {
-    return erreurNonBranche();
+    const contexte = await contexteMembreReel();
+    if (!contexte.ok) {
+      return contexte;
+    }
+    try {
+      const client = getSupabaseClient();
+      const membreId = contexte.valeur.membre.id;
+      const reponseOeuvre = await client
+        .from('oeuvre')
+        .select('*')
+        .eq('id', oeuvre_id)
+        .eq('membre_id', membreId)
+        .maybeSingle();
+      if (reponseOeuvre.error) {
+        return classerErreurRequete(reponseOeuvre.error);
+      }
+      const oeuvre = reponseOeuvre.data as Oeuvre | null;
+      if (!oeuvre) {
+        return refusOeuvreIntrouvable();
+      }
+      if (!STATUTS_OEUVRE_MODIFIABLES.includes(oeuvre.statut)) {
+        return erreurMetier(
+          CODE_OEUVRE_NON_MODIFIABLE,
+          'Cette œuvre a déjà été traitée par l’OMDA : elle n’est plus modifiable depuis cet écran.',
+        );
+      }
+
+      const miseAJour: Record<string, unknown> = { updated_at: new Date().toISOString() };
+      if (entree.titre !== undefined) {
+        miseAJour.titre = entree.titre.trim();
+      }
+      if (entree.categorie_id !== undefined) {
+        miseAJour.categorie_id = entree.categorie_id;
+      }
+      if (entree.description !== undefined) {
+        miseAJour.description = entree.description;
+      }
+      if (entree.annee !== undefined) {
+        miseAJour.annee = entree.annee;
+      }
+      /** Remplacement du fichier de l'œuvre (l'ancien n'est plus référencé). */
+      if (entree.fichier !== undefined) {
+        miseAJour.chemin_fichier = entree.fichier.chemin_stockage;
+        miseAJour.mime_type = entree.fichier.mime_type;
+        miseAJour.taille_octets = entree.fichier.taille_octets;
+      }
+
+      const reponse = await client
+        .from('oeuvre')
+        .update(miseAJour)
+        .eq('id', oeuvre.id)
+        .eq('membre_id', membreId)
+        .select('*');
+      if (reponse.error) {
+        return classerErreurRequete(reponse.error);
+      }
+      const [miseAJourLigne] = reponse.data ?? [];
+      if (!miseAJourLigne) {
+        return refusEcritureSansLigne();
+      }
+
+      /** Remplacement de l'attestation de diffusion (jamais de suppression). */
+      if (entree.attestation !== undefined) {
+        const refusAttestation = await remplacerAttestationReelle(oeuvre.id, entree.attestation);
+        if (refusAttestation) {
+          return refusAttestation;
+        }
+      }
+      return ok(miseAJourLigne as Oeuvre);
+    } catch (cause) {
+      return erreurReseau(texteDe(cause));
+    }
   }
 
+  /**
+   * Envoi d'une œuvre : passage à `ENVOYEE` avec `date_soumission`, son fichier
+   * et au moins une attestation de diffusion (règle métier 8 — refus
+   * `DOSSIER_INCOMPLET` identique au mock). Aucun paiement n'est déclenché
+   * (règle métier 4). L'attestation est enregistrée AVANT la transition :
+   * une œuvre ne passe jamais à `ENVOYEE` sans son attestation.
+   */
   async soumettreOeuvre(entree: SoumettreOeuvreEntree): Promise<Result<Oeuvre>> {
-    return erreurNonBranche();
+    const contexte = await contexteMembreReel();
+    if (!contexte.ok) {
+      return contexte;
+    }
+    try {
+      const client = getSupabaseClient();
+      const membreId = contexte.valeur.membre.id;
+      const reponseOeuvre = await client
+        .from('oeuvre')
+        .select('*')
+        .eq('id', entree.oeuvre_id)
+        .eq('membre_id', membreId)
+        .maybeSingle();
+      if (reponseOeuvre.error) {
+        return classerErreurRequete(reponseOeuvre.error);
+      }
+      const oeuvre = reponseOeuvre.data as Oeuvre | null;
+      if (!oeuvre) {
+        return refusOeuvreIntrouvable();
+      }
+      if (oeuvre.statut !== 'BROUILLON') {
+        return erreurMetier(
+          CODE_OEUVRE_NON_MODIFIABLE,
+          'Cette œuvre a déjà été envoyée : vous pouvez suivre son état.',
+        );
+      }
+      if (entree.attestations.length === 0) {
+        return erreurMetier(
+          CODES_ERREUR_CANDIDAT.DOSSIER_INCOMPLET,
+          'Joignez au moins une attestation de diffusion avant d’envoyer l’œuvre.',
+        );
+      }
+
+      /** Attestation de diffusion enregistrée avec l'œuvre (règle métier 8). */
+      const [attestation] = entree.attestations;
+      const refusAttestation = await remplacerAttestationReelle(oeuvre.id, attestation);
+      if (refusAttestation) {
+        return refusAttestation;
+      }
+
+      const horodatage = new Date().toISOString();
+      const reponse = await client
+        .from('oeuvre')
+        .update({
+          chemin_fichier: entree.fichier.chemin_stockage,
+          mime_type: entree.fichier.mime_type,
+          taille_octets: entree.fichier.taille_octets,
+          statut: 'ENVOYEE',
+          date_soumission: horodatage,
+          updated_at: horodatage,
+        })
+        .eq('id', oeuvre.id)
+        .eq('membre_id', membreId)
+        .select('*');
+      if (reponse.error) {
+        return classerErreurRequete(reponse.error);
+      }
+      const [envoyee] = reponse.data ?? [];
+      if (!envoyee) {
+        return refusEcritureSansLigne();
+      }
+      return ok(envoyee as Oeuvre);
+    } catch (cause) {
+      return erreurReseau(texteDe(cause));
+    }
   }
 
   /**
