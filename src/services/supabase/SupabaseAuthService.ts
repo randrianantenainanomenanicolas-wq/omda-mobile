@@ -41,6 +41,52 @@ function texteDe(cause: unknown): string | undefined {
 }
 
 /**
+ * Drapeaux `doit_changer_mot_de_passe` lus dans la table `utilisateur`
+ * (règle métier 10), mémoïsés par identifiant de compte : les événements de
+ * session synchrones (`onAuthStateChange`) voient alors la même valeur que
+ * les lectures explicites après connexion.
+ */
+const drapeauxChangementMotDePasse = new Map<string, boolean>();
+
+/**
+ * Recharge le drapeau depuis la table `utilisateur` APRÈS connexion.
+ *
+ * Lecture simple sur la ligne du compte connecté (politique
+ * `utilisateur_select_self_or_staff`). En cas d'échec (réseau, politique
+ * absente, ligne introuvable), le cache puis les métadonnées de session
+ * restent utilisés : aucune exception ne remonte et le routing continue de
+ * fonctionner avec le repli de l'étape 17.
+ */
+async function chargerDrapeauChangement(user: User): Promise<void> {
+  try {
+    const { data, error } = await getSupabaseClient()
+      .from('utilisateur')
+      .select('doit_changer_mot_de_passe')
+      .eq('id', user.id)
+      .maybeSingle();
+    if (!error && data && typeof data.doit_changer_mot_de_passe === 'boolean') {
+      drapeauxChangementMotDePasse.set(user.id, data.doit_changer_mot_de_passe);
+    }
+  } catch {
+    // Repli silencieux sur les métadonnées de session.
+  }
+}
+
+/**
+ * Drapeau en vigueur pour le compte : table `utilisateur` dès qu'elle a pu
+ * être lue (valeur mémorisée), sinon métadonnées `user_metadata`
+ * (repli de l'étape 17, comportement inchangé en l'absence de base).
+ */
+function drapeauChangement(user: User): boolean {
+  const memorise = drapeauxChangementMotDePasse.get(user.id);
+  if (typeof memorise === 'boolean') {
+    return memorise;
+  }
+  const metadonnees = (user.user_metadata ?? {}) as Record<string, unknown>;
+  return metadonnees.doit_changer_mot_de_passe === true;
+}
+
+/**
  * Traduit une erreur Supabase Auth en `Result` typé.
  *
  * Les messages sont volontairement en français (vouvoiement) et ne reprennent
@@ -106,7 +152,7 @@ function classerErreurAuth(error: AuthError): ResultErr {
 function utilisateurDepuisSupabase(user: User): Utilisateur {
   const metadonnees = (user.user_metadata ?? {}) as Record<string, unknown>;
   const telephone = typeof metadonnees.telephone === 'string' ? metadonnees.telephone : null;
-  const doitChanger = metadonnees.doit_changer_mot_de_passe === true;
+  const doitChanger = drapeauChangement(user);
   const cree = user.created_at ?? new Date().toISOString();
 
   return {
@@ -153,6 +199,9 @@ function sessionDepuisSupabase(user: User, session: Session): SessionMembre {
  * - `obtenirSession`            → `getSession` (session restaurée au démarrage)
  * - `demanderReinitialisationMotDePasse` → `resetPasswordForEmail` (réponse
  *   constante : aucune fuite sur l'existence du compte)
+ * - `doit_changer_mot_de_passe` relu dans la table `utilisateur` après
+ *   connexion (règle métier 10), repli sur `user_metadata` si la lecture
+ *   échoue ; remis à `false` en base lors du changement
  * - `changerMotDePasse`         → vérification du mot de passe actuel par
  *   ré-authentification puis `updateUser` (mot de passe + drapeau de première
  *   connexion remis à `false`)
@@ -177,6 +226,7 @@ export class SupabaseAuthService implements AuthService {
           message: 'Réponse d’authentification incomplète. Réessayez dans un instant.',
         });
       }
+      await chargerDrapeauChangement(data.user);
       return ok(sessionDepuisSupabase(data.user, data.session));
     } catch (cause) {
       return erreurReseau(texteDe(cause));
@@ -193,6 +243,7 @@ export class SupabaseAuthService implements AuthService {
       if (error) {
         return classerErreurAuth(error);
       }
+      drapeauxChangementMotDePasse.clear();
       return ok(undefined);
     } catch (cause) {
       return erreurReseau(texteDe(cause));
@@ -212,6 +263,7 @@ export class SupabaseAuthService implements AuthService {
       if (!data.session || !data.session.user) {
         return ok(null);
       }
+      await chargerDrapeauChangement(data.session.user);
       return ok(sessionDepuisSupabase(data.session.user, data.session));
     } catch (cause) {
       return erreurReseau(texteDe(cause));
@@ -231,6 +283,19 @@ export class SupabaseAuthService implements AuthService {
         entree.email.trim().toLowerCase(),
       );
       if (error) {
+        // Si Supabase annonce l'absence de compte, la réponse reste IDENTIQUE
+        // à celle d'un compte existant : aucune fuite d'information.
+        const texte = (error.message ?? '').toLowerCase();
+        const code = (error.code ?? '').toLowerCase();
+        const compteInconnu =
+          code === 'user_not_found' ||
+          texte.includes('user not found') ||
+          texte.includes('could not find user') ||
+          texte.includes('no user found') ||
+          texte.includes('email address not found');
+        if (compteInconnu) {
+          return ok(undefined);
+        }
         return classerErreurAuth(error);
       }
       return ok(undefined);
@@ -258,7 +323,8 @@ export class SupabaseAuthService implements AuthService {
         return classerErreurAuth(erreurSession);
       }
       const email = sessionData.session?.user.email ?? null;
-      if (!email) {
+      const identifiant = sessionData.session?.user.id ?? null;
+      if (!email || !identifiant) {
         return erreurMetier(
           CODES_ERREUR_AUTH.SESSION_EXPIREE,
           'Votre session a expiré. Reconnectez-vous pour continuer.',
@@ -291,6 +357,19 @@ export class SupabaseAuthService implements AuthService {
         return classerErreurAuth(miseAJour.error);
       }
 
+      // Règle métier 10 : le drapeau repasse à `false` EN BASE (table
+      // `utilisateur`, politique `utilisateur_update_self_or_admin`) et en
+      // mémoire — la prochaine connexion ne rebloque donc pas l'écran.
+      drapeauxChangementMotDePasse.set(identifiant, false);
+      try {
+        await client
+          .from('utilisateur')
+          .update({ doit_changer_mot_de_passe: false })
+          .eq('id', identifiant);
+      } catch {
+        // Échec best-effort : les métadonnées de session restent à jour.
+      }
+
       const { data: apres, error: erreurApres } = await client.auth.getSession();
       if (erreurApres) {
         return classerErreurAuth(erreurApres);
@@ -313,7 +392,12 @@ export class SupabaseAuthService implements AuthService {
       return () => undefined;
     }
     const { data } = getSupabaseClient().auth.onAuthStateChange((_evenement, session) => {
-      rappel(session && session.user ? sessionDepuisSupabase(session.user, session) : null);
+      if (!session || !session.user) {
+        drapeauxChangementMotDePasse.clear();
+        rappel(null);
+        return;
+      }
+      rappel(sessionDepuisSupabase(session.user, session));
     });
     return () => {
       data.subscription.unsubscribe();
