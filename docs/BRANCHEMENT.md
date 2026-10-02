@@ -57,14 +57,35 @@ variables sont lues au démarrage du bundle.
 2. Passer `EXPO_PUBLIC_USE_MOCKS_MEMBER=false`.
 3. Redémarrer Metro (`npx expo start -c`).
 
-### 2.2 Parcours CANDIDAT (API REST Express)
+### 2.2 Avec API Express : endpoints + baseURL
 
-1. Renseigner `EXPO_PUBLIC_API_BASE_URL` (sans barre finale : `HttpCandidateApi`
-   ajoute lui-même le préfixe `/v1`).
+1. Renseigner `EXPO_PUBLIC_API_BASE_URL` — l'URL de **base** de l'API Express,
+   **sans barre finale** : `HttpCandidateApi` ajoute lui-même le préfixe `/v1`.
 2. Passer `EXPO_PUBLIC_USE_MOCKS_CANDIDATE=false`.
 3. Redémarrer Metro (`npx expo start -c`).
 
-### 2.3 Cas « pas d'API Express candidat »
+`candidateApi` devient alors `HttpCandidateApi` : chaque URL est composée
+`EXPO_PUBLIC_API_BASE_URL` + `/v1` + chemin (ex.
+`https://api.omda.mg/v1/demandes`). Les 8 méthodes du contrat `CandidateApi`
+appellent :
+
+| Méthode `CandidateApi` | Requête (après `baseURL` + `/v1`) |
+|---|---|
+| `creerDemande` | `POST /demandes` |
+| `mettreAJourDemande` | `PATCH /demandes/{numero_dossier}` |
+| `soumettreDemande` | `POST /demandes/{numero_dossier}/envoi` (+ `Idempotency-Key`) |
+| `televerserFichier` | `POST /fichiers` (multipart) |
+| `suivreDemande` | `GET /suivi/{numero_dossier}` |
+| `obtenirOptionsPaiement` | `GET /paiements/options/{numero_dossier}` |
+| `initierPaiement` | `POST /paiements` (+ `Idempotency-Key`) |
+| `obtenirEtatPaiement` | `GET /paiements/{reference_interne}` |
+
+En-têtes : `X-Numero-Dossier` / `X-Code-Suivi` (dès qu'un dossier est connu) et
+`Idempotency-Key` (envoi de dossier, initiation de paiement) ; délai **15 s** par
+requête JSON et **120 s** par téléversement. Contrat complet :
+`docs/API_CANDIDAT.md` (§5, §7, §9).
+
+### 2.3 Sans API Express : parcours candidat reste en mock
 
 Le parcours candidat **reste en mock**, sans aucune configuration à ajouter :
 
@@ -77,6 +98,13 @@ Ce garde-fou évite d'instancier `HttpCandidateApi` sans serveur à joindre : au
 (EXPO_PUBLIC_API_BASE_URL)… ». Le parcours adhésion / suivi / paiement continue
 donc de fonctionner avec ses données de démonstration pendant que le parcours
 membre est déjà branché sur Supabase.
+
+**Aucun crash si la base URL est vide** (vérifié par script, étape 25) : même si
+`HttpCandidateApi` était instancié à la main, aucune méthode ne lève
+d'exception — `demander()` et `televerserFichier()` renvoient immédiatement un
+`Result` `serveur` « L'API OMDA n'est pas configurée (EXPO_PUBLIC_API_BASE_URL)… »,
+sans aucun appel réseau. Le parcours candidat reste donc utilisable et
+l'application ne plante jamais, même sans configuration.
 
 ### 2.4 Sélection effectuée par la fabrique
 
