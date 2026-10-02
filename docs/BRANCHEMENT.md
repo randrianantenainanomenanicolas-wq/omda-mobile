@@ -1,10 +1,13 @@
 # Branchement réel (Supabase + API Express) — OMDA Mobile
 
-- **Étape** : 17 — « Préparer le branchement Supabase (sans activer en prod) ».
-- **Principe** : l'application fonctionne **intégralement en mode mock par défaut**
-  (`EXPO_PUBLIC_USE_MOCKS=true`). Le branchement réel se fait **sans toucher aux
-  écrans**, via la fabrique `src/services/factory.ts` et les variables
-  d'environnement.
+- **Étape** : 21 — « Sélection mock ⇄ réel robuste et séparée (Membre / Candidat) ».
+- **Principe** : l'application fonctionne **intégralement en mode mock par
+  défaut**. La bascule se fait **sans toucher aux écrans**, via la fabrique
+  `src/services/factory.ts` et des variables d'environnement.
+- **Deux parcours, deux flags** : le parcours **MEMBRE** (Supabase) et le parcours
+  **CANDIDAT** (API REST Express) se branchent **indépendamment**. On peut donc
+  passer le membre en réel alors que l'API Express du candidat n'existe pas
+  encore : le candidat reste alors en démonstration (voir §2.3).
 
 ---
 
@@ -14,10 +17,29 @@ Copiez `.env.example` en `.env` (fichier ignoré par git) et complétez :
 
 | Variable | Obligatoire | Rôle |
 |---|---|---|
-| `EXPO_PUBLIC_USE_MOCKS` | oui | `true` (défaut) = mocks ; `false` = services réels |
-| `EXPO_PUBLIC_SUPABASE_URL` | si mode réel | URL du projet Supabase |
-| `EXPO_PUBLIC_SUPABASE_ANON_KEY` | si mode réel | Clé publique anonyme (`anon`) |
-| `EXPO_PUBLIC_API_BASE_URL` | si parcours candidat réel | URL de l'API REST Express candidat |
+| `EXPO_PUBLIC_SUPABASE_URL` | si parcours membre réel | URL du projet Supabase |
+| `EXPO_PUBLIC_SUPABASE_ANON_KEY` | si parcours membre réel | Clé publique anonyme (`anon`) |
+| `EXPO_PUBLIC_API_BASE_URL` | si parcours candidat réel | URL de l'API REST Express candidat. **Vide ⇒ le candidat reste en mock** |
+| `EXPO_PUBLIC_USE_MOCKS_MEMBER` | non (`true` par défaut) | Parcours **MEMBRE** : `true` = mocks, `false` = Supabase (auth + données + contenus publics) |
+| `EXPO_PUBLIC_USE_MOCKS_CANDIDATE` | non (`true` par défaut) | Parcours **CANDIDAT** : `true` = mock, `false` = API Express (à condition que `EXPO_PUBLIC_API_BASE_URL` soit renseignée) |
+| `EXPO_PUBLIC_USE_MOCKS` | non | **Repli de compatibilité** : utilisée seulement si le flag du parcours concerné n'est pas défini |
+
+### Règles de lecture (implémentées dans `src/services/factory.ts`)
+
+1. **Mock par défaut** : seule la valeur exacte `false` (insensible à la casse et
+   aux espaces) bascule un parcours en réel ; toute autre valeur — y compris une
+   variable absente ou vide — conserve les mocks.
+2. **Repli** : `EXPO_PUBLIC_USE_MOCKS` s'applique au parcours dont le flag dédié
+   n'est pas défini, de sorte que les `.env` déjà en place continuent de
+   fonctionner à l'identique.
+3. **Pas d'API Express ⇒ candidat en mock** : même avec
+   `EXPO_PUBLIC_USE_MOCKS_CANDIDATE=false`, `candidateApi` reste
+   `MockCandidateApi` tant que `EXPO_PUBLIC_API_BASE_URL` est vide : sans serveur
+   à joindre, aucun appel réel n'est tenté (le parcours candidat reste utilisable
+   en démonstration, cf. §2.3).
+4. **Contenus publics** : `publicContentService` suit le flag **MEMBRE**
+   (`documentation`, `categorie`, `tarif`, `operateur_mobile_money` sont des
+   tables Supabase, §5 de `docs/SCHEMA_DB.md`).
 
 > Préfixe `EXPO_PUBLIC_` : ces valeurs sont intégrées au bundle par Expo et sont
 > donc **publiques**. N'y mettez jamais de clé `service_role` ni de secret.
@@ -27,23 +49,46 @@ variables sont lues au démarrage du bundle.
 
 ---
 
-## 2) Passer en mode réel
+## 2) Brancher un parcours
+
+### 2.1 Parcours MEMBRE (Supabase)
 
 1. Renseigner `EXPO_PUBLIC_SUPABASE_URL` et `EXPO_PUBLIC_SUPABASE_ANON_KEY`.
-2. Passer `EXPO_PUBLIC_USE_MOCKS=false`.
+2. Passer `EXPO_PUBLIC_USE_MOCKS_MEMBER=false`.
 3. Redémarrer Metro (`npx expo start -c`).
 
-La fabrique `src/services/factory.ts` sélectionne alors :
+### 2.2 Parcours CANDIDAT (API REST Express)
 
-| Singleton exporté | Mode mock (défaut) | Mode réel |
-|---|---|---|
-| `authService` | `MockAuthService` | `SupabaseAuthService` (implémenté) |
-| `memberRepository` | `MockMemberRepository` | `SupabaseMemberRepository` (squelette) |
-| `publicContentService` | `MockPublicContentService` | `SupabasePublicContentService` (squelette) |
-| `candidateApi` | `MockCandidateApi` | `HttpCandidateApi` (squelette) |
+1. Renseigner `EXPO_PUBLIC_API_BASE_URL` (sans barre finale : `HttpCandidateApi`
+   ajoute lui-même le préfixe `/v1`).
+2. Passer `EXPO_PUBLIC_USE_MOCKS_CANDIDATE=false`.
+3. Redémarrer Metro (`npx expo start -c`).
 
-Pour revenir en démonstration : `EXPO_PUBLIC_USE_MOCKS=true` (ou supprimer la
-variable). Toute valeur autre que `false` conserve les mocks.
+### 2.3 Cas « pas d'API Express candidat »
+
+Le parcours candidat **reste en mock**, sans aucune configuration à ajouter :
+
+- soit `EXPO_PUBLIC_USE_MOCKS_CANDIDATE` vaut `true` (valeur par défaut) ;
+- soit `EXPO_PUBLIC_API_BASE_URL` est **vide**, même avec
+  `EXPO_PUBLIC_USE_MOCKS_CANDIDATE=false`.
+
+Ce garde-fou évite d'instancier `HttpCandidateApi` sans serveur à joindre : aucun
+écran ne peut afficher le refus « L'API OMDA n'est pas configurée
+(EXPO_PUBLIC_API_BASE_URL)… ». Le parcours adhésion / suivi / paiement continue
+donc de fonctionner avec ses données de démonstration pendant que le parcours
+membre est déjà branché sur Supabase.
+
+### 2.4 Sélection effectuée par la fabrique
+
+| Singleton exporté | Parcours | Mode mock (défaut) | Mode réel |
+|---|---|---|---|
+| `authService` | Membre | `MockAuthService` | `SupabaseAuthService` (implémenté) |
+| `memberRepository` | Membre | `MockMemberRepository` | `SupabaseMemberRepository` (lectures + Storage branchés, écritures à venir) |
+| `publicContentService` | Membre | `MockPublicContentService` | `SupabasePublicContentService` (squelette) |
+| `candidateApi` | Candidat | `MockCandidateApi` | `HttpCandidateApi` (implémenté) |
+
+Pour revenir en démonstration : passer le flag du parcours à `true` (ou le
+supprimer). Toute valeur autre que `false` conserve les mocks.
 
 ---
 
@@ -51,13 +96,14 @@ variable). Toute valeur autre que `false` conserve les mocks.
 
 | Fichier | Contenu |
 |---|---|
-| `src/services/factory.ts` | Fabrique : singletons + lecture de `EXPO_PUBLIC_USE_MOCKS` |
+| `src/services/factory.ts` | Fabrique : singletons + lecture des flags `EXPO_PUBLIC_USE_MOCKS_MEMBER` / `EXPO_PUBLIC_USE_MOCKS_CANDIDATE` (repli `EXPO_PUBLIC_USE_MOCKS`) |
 | `src/services/supabase/client.ts` | `createClient(URL, anonKey)` **paresseux** + session persistée par `expo-secure-store` |
 | `src/services/supabase/SupabaseAuthService.ts` | `AuthService` réel (signInWithPassword / signOut / resetPasswordForEmail / updateUser / getSession / onAuthStateChange) |
-| `src/services/supabase/SupabaseMemberRepository.ts` | `MemberRepository` — **squelette** (renvoie un refus « non branché ») |
-| `src/services/supabase/SupabasePublicContentService.ts` | `PublicContentService` — **squelette** |
-| `src/services/http/HttpCandidateApi.ts` | `CandidateApi` — **squelette** (API Express, `EXPO_PUBLIC_API_BASE_URL`) |
-| `src/services/nonImplemente.ts` | Refus serveur standard des squelettes |
+| `src/services/supabase/SupabaseMemberRepository.ts` | `MemberRepository` — 9 lectures réelles + Storage (`televerserFichier`, `obtenirUrlFichier`) ; **écritures encore en `erreurNonBranche()`** |
+| `src/services/supabase/storage.ts` | Envoi natif avec progression + annulation, liens signés et suppression — buckets `pieces` / `oeuvres` |
+| `src/services/supabase/SupabasePublicContentService.ts` | `PublicContentService` — **squelette** (refus « non branché ») : à écrire avant de brancher les contenus publics |
+| `src/services/http/HttpCandidateApi.ts` | `CandidateApi` — **implémenté** (8/8 méthodes, `docs/API_CANDIDAT.md`, `EXPO_PUBLIC_API_BASE_URL`) |
+| `src/services/nonImplemente.ts` | Refus serveur standard des parties non encore branchées |
 
 **Sécurité du démarrage** : le client Supabase est créé au **premier appel réel**
 (`getSupabaseClient()`), jamais à l'import. Une configuration absente ne fait donc
@@ -107,14 +153,17 @@ autorisant un membre à lire/écrire uniquement sous son propre préfixe
 
 ## 6) Ce qui reste à écrire (prochaines étapes)
 
-1. `SupabaseMemberRepository` : requêtes réelles (`utilisateur`, `membre`,
-   `membre_categorie`, `oeuvre`, `attestation_diffusion`, `cotisation`,
-   `paiement`, `notification`) + Storage (`upload`, progression, URL signées
-   pour `obtenirUrlFichier`).
-2. `SupabasePublicContentService` : lecture de `documentation`, `categorie`,
-   `tarif`, `operateur_mobile_money` (avec `actif = true`).
-3. `HttpCandidateApi` : appels REST réels (`docs/API_CANDIDAT.md`).
-4. Branchement effectif des écrans/contextes sur `src/services/factory.ts`
+1. `SupabaseMemberRepository` : les **écritures** encore en `erreurNonBranche()`
+   (`mettreAJourProfil`, demandes de catégorie, `creerOeuvre`,
+   `mettreAJourOeuvre`, `soumettreOeuvre`, paiements, marquage des
+   notifications) — les 9 lectures et le Storage sont déjà branchés (étapes 18
+   et 20).
+2. `SupabasePublicContentService` : lecture de `documentation`,
+   `categorie`, `tarif`, `operateur_mobile_money` (avec `actif = true`). ⚠️ Tant
+   qu'il reste un squelette, passer `EXPO_PUBLIC_USE_MOCKS_MEMBER=false` bascule
+   AUSSI les contenus publics (documentation, tarifs, catégories) sur ce
+   squelette : ils renverront un refus « non branché ».
+3. Branchement effectif des écrans/contextes sur `src/services/factory.ts`
    (aujourd'hui ils consomment encore le barrel `src/services/mocks`, dont le
    comportement est identique en mode mock).
 
@@ -124,7 +173,10 @@ autorisant un membre à lire/écrire uniquement sous son propre préfixe
 
 | Symptôme | Cause probable |
 |---|---|
-| Bannière « Service réel pas encore branché… » | `EXPO_PUBLIC_USE_MOCKS=false` alors que les squelettes ne sont pas encore implémentés |
-| « Supabase n'est pas configuré… » | `EXPO_PUBLIC_SUPABASE_URL` ou `EXPO_PUBLIC_SUPABASE_ANON_KEY` vide |
+| Bannière « Service réel pas encore branché… » | Un parcours est en réel alors que son implémentation est encore un squelette (typiquement `EXPO_PUBLIC_USE_MOCKS_MEMBER=false` et les contenus publics) |
+| « Supabase n'est pas configuré… » | `EXPO_PUBLIC_SUPABASE_URL` ou `EXPO_PUBLIC_SUPABASE_ANON_KEY` vide alors que le parcours membre est en réel |
+| « L'API OMDA n'est pas configurée… » | `HttpCandidateApi` utilisé sans `EXPO_PUBLIC_API_BASE_URL` (impossible via la fabrique : le candidat reste alors en mock) |
+| Le parcours candidat reste en mock | `EXPO_PUBLIC_API_BASE_URL` vide, ou `EXPO_PUBLIC_USE_MOCKS_CANDIDATE` pas passée à `false` |
+| Le parcours membre reste en mock | `EXPO_PUBLIC_USE_MOCKS_MEMBER` absente et repli `EXPO_PUBLIC_USE_MOCKS` encore à `true` |
 | Les variables ne sont pas prises en compte | Metro n'a pas été redémarré (`npx expo start -c`) |
 
