@@ -149,6 +149,32 @@ Buckets (`storage.objects`) : `pieces` et `oeuvres` en **privé** ; politique
 autorisant un membre à lire/écrire uniquement sous son propre préfixe
 (`<utilisateur_id>/…`), et l'API Express à écrire pour le candidat.
 
+### Migrations RLS à exécuter
+
+Les écritures membre de `SupabaseMemberRepository` (étape 23) exigent des
+politiques absentes du script initial de `docs/SCHEMA_DB.md`. Elles sont
+fournies dans `supabase/migrations/` et doivent être exécutées **dans
+l'éditeur SQL de Supabase** (Dashboard Supabase → **SQL Editor** →
+*New query* → coller le contenu du fichier → **Run**), **dans cet ordre** :
+
+| Ordre | Fichier | Ce qu'il apporte |
+|---|---|---|
+| 1 | `supabase/migrations/0001_oeuvre_membre.sql` | Vérifie la politique `INSERT` `oeuvre_insert_owner_or_staff` du schéma initial (bloc `DO`), puis ajoute la politique `UPDATE` du membre sur **ses propres œuvres** (`membre_id` lié à `auth.uid()`), réservée aux statuts `BROUILLON` / `ENVOYEE` / `EN_COURS_DE_VALIDATION` |
+| 2 | `supabase/migrations/0002_attestation_diffusion_membre.sql` | `SELECT` / `INSERT` / `UPDATE` pour le **propriétaire de l'œuvre** (remplacement d'attestation, jamais de `DELETE`) + contrainte `CHECK` sur `mime_type` : `application/pdf`, `image/jpeg`, `image/png` |
+| 3 | `supabase/migrations/0003_membre_categorie_membre.sql` | `INSERT` d'une demande `EN_ATTENTE` par le membre + `UPDATE` d'**annulation uniquement** (`EN_ATTENTE` ⇒ `ANNULEE`, propriétaire seulement) |
+
+> **Avertissement** : exécuter ces fichiers **dans le SQL editor Supabase**
+> (ni depuis un terminal, ni depuis l'application), **après** le script
+> initial de `docs/SCHEMA_DB.md` et **dans l'ordre 0001 → 0002 → 0003**.
+> Chaque migration est idempotente (`drop policy if exists`) et peut être
+> relancée sans risque.
+
+> **Limite connue** : la migration 0003 n'ouvre que l'annulation — la
+> **réouverture** d'une demande (`ANNULEE` / `REJETEE` ⇒ `EN_ATTENTE`) reste
+> bloquée par RLS en mode réel (refus « écriture sans ligne » dans
+> `demanderCategorieSupplementaireAvecOeuvres`). Signal détaillé dans la
+> note d'étape 24 de `docs/PROGRESS.md`.
+
 ---
 
 ## 6) Ce qui reste à écrire (prochaines étapes)
