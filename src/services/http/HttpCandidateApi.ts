@@ -14,6 +14,9 @@
  * montant non confirmés) : `REUSSI` exige `date_confirmation`, `REJETEE` exige
  * `motif_rejet`, `VALIDEE` exige `paiement_du`, seuls le mode `MOBILE_MONEY`
  * (MVola) et la devise `MGA` sont admis — aucun virement n'existe ici.
+ * Contrôles PRÉ-ENVOI identiques aux mocks (étape 27) : type MIME du bucket et
+ * 20 Mo avant chaque téléversement (§5.3) ; mode et opérateur MVola vérifiés
+ * avant toute initiation de paiement (§5.7 / §9).
  *
  * Le mode mock reste le défaut : la fabrique n'instancie cette classe que si
  * `EXPO_PUBLIC_USE_MOCKS_CANDIDATE=false` — auquel cas elle l'est
@@ -28,6 +31,8 @@ import {
   OPERATEURS_PAIEMENT,
   STATUTS_DEMANDE,
   STATUTS_PAIEMENT,
+  TAILLE_MAX_FICHIER_OCTETS,
+  TYPES_MIME_AUTORISES,
   TYPES_PAIEMENT,
   type CodeDevise,
   type HorodatageISO,
@@ -47,6 +52,7 @@ import {
   erreurReseau,
   erreurServeur,
   ok,
+  CODES_ERREUR_CANDIDAT,
   type CandidateApi,
   type ConfirmationEnvoiDemande,
   type CreerDemandeEntree,
@@ -92,6 +98,14 @@ export const MESSAGE_REPONSE_INATTENDUE =
 /** Code local d'annulation d'un envoi (identique à `CODES_MOCK` côté mock). */
 const CODE_TELEVERSEMENT_ANNULE = 'TELEVERSEMENT_ANNULE';
 const MESSAGE_TELEVERSEMENT_ANNULE = 'L’envoi a été annulé. Vous pouvez réessayer.';
+
+/**
+ * Refus local d'un mode autre que Mobile Money : même vocabulaire que
+ * `CODES_MOCK.MODE_PAIEMENT_INVALIDE` des mocks (« à reprendre tels quels côté
+ * serveur », `docs/DONNEES_TEST.md`) — repris en littéral pour ne pas coupler
+ * la couche réelle au module des mocks.
+ */
+const CODE_MODE_PAIEMENT_INVALIDE = 'MODE_PAIEMENT_INVALIDE';
 
 /* ------------------------------------------------- Helpers utilitaires */
 
@@ -584,6 +598,9 @@ export class HttpCandidateApi implements CandidateApi {
    * création du dossier). Progression réelle via `upload.onprogress`
    * (0 → 99 % puis 100 % à la confirmation), annulation par `AbortSignal`
    * ⇒ métier `TELEVERSEMENT_ANNULE`, délai maximal `DELAI_TIMEOUT_TELEVERSEMENT_MS`.
+   * Contrôles pré-envoi identiques aux mocks (§5.3) : type MIME du bucket
+   * (`TYPES_MIME_AUTORISES`) puis 20 Mo — l'attestation (PDF/JPEG/PNG) est
+   * contrôlée par les écrans puis revalidée à l'envoi du dossier.
    */
   async televerserFichier(
     entree: TeleversementEntree,
@@ -591,6 +608,19 @@ export class HttpCandidateApi implements CandidateApi {
   ): Promise<Result<FichierTeleverse>> {
     if (API_BASE_URL === '') {
       return erreurServeur({ message: MESSAGE_API_NON_CONFIGURE });
+    }
+    const mimesAutorises = TYPES_MIME_AUTORISES[entree.bucket] as readonly string[];
+    if (!mimesAutorises.includes(entree.mime_type)) {
+      return erreurMetier(
+        CODES_ERREUR_CANDIDAT.TYPE_FICHIER_NON_AUTORISE,
+        'Ce format de fichier n’est pas accepté pour ce dépôt (JPEG, PNG ou PDF).',
+      );
+    }
+    if (entree.taille_octets > TAILLE_MAX_FICHIER_OCTETS) {
+      return erreurMetier(
+        CODES_ERREUR_CANDIDAT.FICHIER_TROP_VOLUMINEUX,
+        'Le fichier dépasse la taille maximale de 20 Mo.',
+      );
     }
     if (options?.signal?.aborted) {
       return refusAnnulation();
@@ -796,8 +826,30 @@ export class HttpCandidateApi implements CandidateApi {
 
   /* -------------------------- Paiement : initiation, état et polling */
 
-  /** Initie un paiement Mobile Money (§5.7) : `201` = initiation UNIQUEMENT. */
+  /**
+   * Initie un paiement Mobile Money (§5.7) : `201` = initiation UNIQUEMENT.
+   * MVola only (§9) : refus locaux identiques aux mocks pour tout mode ≠
+   * `MOBILE_MONEY` ou opérateur absent/hors `OPERATEURS_PAIEMENT`, avant tout
+   * appel réseau.
+   */
   async initierPaiement(entree: InitierPaiementEntree): Promise<Result<EtatPaiementCandidat>> {
+    if (!(MODES_PAIEMENT as readonly string[]).includes(entree.mode)) {
+      return erreurMetier(
+        CODE_MODE_PAIEMENT_INVALIDE,
+        'Seul le paiement par Mobile Money (MVola) est proposé.',
+      );
+    }
+    const operateurAdmis =
+      entree.operateur !== undefined &&
+      entree.operateur !== null &&
+      (OPERATEURS_PAIEMENT as readonly string[]).includes(entree.operateur);
+    if (!operateurAdmis) {
+      return erreurMetier(
+        CODES_ERREUR_CANDIDAT.OPERATEUR_INDISPONIBLE,
+        'Cet opérateur Mobile Money est momentanément indisponible.',
+      );
+    }
+
     const reponse = await demander({
       methode: 'POST',
       chemin: '/paiements',
