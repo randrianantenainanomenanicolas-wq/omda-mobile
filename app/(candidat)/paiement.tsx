@@ -26,7 +26,7 @@ import type {
   OptionsPaiementCandidat,
 } from '../../src/services/contracts';
 import { obtenirHistoriqueDossiers } from '../../src/services/local/historiqueDossiers';
-import { mockCandidateApi } from '../../src/services/mocks';
+import { candidateApi } from '../../src/services/factory';
 import { colors } from '../../src/theme/colors';
 
 /**
@@ -202,7 +202,7 @@ export default function PaiementScreen() {
     setEtat('chargement');
     setErreurChargement(null);
 
-    const reponse = await mockCandidateApi.obtenirOptionsPaiement({
+    const reponse = await candidateApi.obtenirOptionsPaiement({
       numero_dossier: numeroNettoye,
       code_suivi: codeNettoye,
     });
@@ -267,7 +267,7 @@ export default function PaiementScreen() {
         return;
       }
 
-      const reponse = await mockCandidateApi.obtenirEtatPaiement(referenceCourante);
+      const reponse = await candidateApi.obtenirEtatPaiement(referenceCourante);
       if (annule || !monteRef.current) return;
 
       if (reponse.ok) {
@@ -363,7 +363,7 @@ export default function PaiementScreen() {
     setDelaiDepasse(false);
     setInitiationEnCours(true);
 
-    const reponse = await mockCandidateApi.initierPaiement({
+    const reponse = await candidateApi.initierPaiement({
       numero_dossier: numeroDossier,
       code_suivi: codeSuivi,
       mode: 'MOBILE_MONEY',
@@ -391,7 +391,7 @@ export default function PaiementScreen() {
     setVerificationEnCours(true);
     setErreurVerification(null);
 
-    const reponse = await mockCandidateApi.obtenirEtatPaiement(paiement.reference_interne);
+    const reponse = await candidateApi.obtenirEtatPaiement(paiement.reference_interne);
 
     if (!monteRef.current) return;
     setVerificationEnCours(false);

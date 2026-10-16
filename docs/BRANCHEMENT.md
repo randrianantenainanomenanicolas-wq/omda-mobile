@@ -1,13 +1,15 @@
 # Branchement réel (Supabase + API Express) — OMDA Mobile
 
-- **Étape** : 21 — « Sélection mock ⇄ réel robuste et séparée (Membre / Candidat) ».
+- **Étape** : 26 — « Parcours candidat 100 % réel : plus de repli mock » (sélection mock ⇄ réel séparée Membre / Candidat depuis l'étape 21).
 - **Principe** : l'application fonctionne **intégralement en mode mock par
   défaut**. La bascule se fait **sans toucher aux écrans**, via la fabrique
   `src/services/factory.ts` et des variables d'environnement.
 - **Deux parcours, deux flags** : le parcours **MEMBRE** (Supabase) et le parcours
   **CANDIDAT** (API REST Express) se branchent **indépendamment**. On peut donc
   passer le membre en réel alors que l'API Express du candidat n'existe pas
-  encore : le candidat reste alors en démonstration (voir §2.3).
+  encore : il suffit de laisser le flag candidat à `true` pour conserver la
+  démonstration (voir §2.3) — car depuis l'étape 26, `false` est **sans retour
+  possible vers le mock** : il instancie `HttpCandidateApi` même sans URL.
 
 ---
 
@@ -19,9 +21,9 @@ Copiez `.env.example` en `.env` (fichier ignoré par git) et complétez :
 |---|---|---|
 | `EXPO_PUBLIC_SUPABASE_URL` | si parcours membre réel | URL du projet Supabase |
 | `EXPO_PUBLIC_SUPABASE_ANON_KEY` | si parcours membre réel | Clé publique anonyme (`anon`) |
-| `EXPO_PUBLIC_API_BASE_URL` | si parcours candidat réel | URL de l'API REST Express candidat. **Vide ⇒ le candidat reste en mock** |
+| `EXPO_PUBLIC_API_BASE_URL` | si parcours candidat réel | URL de l'API REST Express candidat. **Vide ⇒ chaque appel renvoie une erreur `serveur` typée (« L'API OMDA n'est pas configurée… ») — jamais de retour au mock (étape 26)** |
 | `EXPO_PUBLIC_USE_MOCKS_MEMBER` | non (`true` par défaut) | Parcours **MEMBRE** : `true` = mocks, `false` = Supabase (auth + données + contenus publics) |
-| `EXPO_PUBLIC_USE_MOCKS_CANDIDATE` | non (`true` par défaut) | Parcours **CANDIDAT** : `true` = mock, `false` = API Express (à condition que `EXPO_PUBLIC_API_BASE_URL` soit renseignée) |
+| `EXPO_PUBLIC_USE_MOCKS_CANDIDATE` | non (`true` par défaut) | Parcours **CANDIDAT** : `true` (ou absente) = mock ; `false` = API Express **obligatoirement**, même sans `EXPO_PUBLIC_API_BASE_URL` (erreur typée, étape 26) |
 | `EXPO_PUBLIC_USE_MOCKS` | non | **Repli de compatibilité** : utilisée seulement si le flag du parcours concerné n'est pas défini |
 
 ### Règles de lecture (implémentées dans `src/services/factory.ts`)
@@ -32,11 +34,13 @@ Copiez `.env.example` en `.env` (fichier ignoré par git) et complétez :
 2. **Repli** : `EXPO_PUBLIC_USE_MOCKS` s'applique au parcours dont le flag dédié
    n'est pas défini, de sorte que les `.env` déjà en place continuent de
    fonctionner à l'identique.
-3. **Pas d'API Express ⇒ candidat en mock** : même avec
-   `EXPO_PUBLIC_USE_MOCKS_CANDIDATE=false`, `candidateApi` reste
-   `MockCandidateApi` tant que `EXPO_PUBLIC_API_BASE_URL` est vide : sans serveur
-   à joindre, aucun appel réel n'est tenté (le parcours candidat reste utilisable
-   en démonstration, cf. §2.3).
+3. **Plus de repli mock côté candidat (étape 26)** : le flag
+   `EXPO_PUBLIC_USE_MOCKS_CANDIDATE` est le SEUL sélecteur du parcours candidat.
+   `false` ⇒ `candidateApi` est `HttpCandidateApi` **même si
+   `EXPO_PUBLIC_API_BASE_URL` est vide** : chaque appel renvoie alors un `Result`
+   `serveur` typé (« L'API OMDA n'est pas configurée (EXPO_PUBLIC_API_BASE_URL)… »),
+   sans exception ni appel réseau, affiché en `ErrorState` + « Réessayer » sur les
+   écrans (cf. §2.3).
 4. **Contenus publics** : `publicContentService` suit le flag **MEMBRE**
    (`documentation`, `categorie`, `tarif`, `operateur_mobile_money` sont des
    tables Supabase, §5 de `docs/SCHEMA_DB.md`).
@@ -85,26 +89,23 @@ En-têtes : `X-Numero-Dossier` / `X-Code-Suivi` (dès qu'un dossier est connu) e
 requête JSON et **120 s** par téléversement. Contrat complet :
 `docs/API_CANDIDAT.md` (§5, §7, §9).
 
-### 2.3 Sans API Express : parcours candidat reste en mock
+### 2.3 Sans API Express : erreur claire, plus de repli mock (étape 26)
 
-Le parcours candidat **reste en mock**, sans aucune configuration à ajouter :
+Depuis l'étape 26, il n'y a **plus aucun repli sur le mock** :
 
-- soit `EXPO_PUBLIC_USE_MOCKS_CANDIDATE` vaut `true` (valeur par défaut) ;
-- soit `EXPO_PUBLIC_API_BASE_URL` est **vide**, même avec
-  `EXPO_PUBLIC_USE_MOCKS_CANDIDATE=false`.
+- `EXPO_PUBLIC_USE_MOCKS_CANDIDATE` absente ou `true` (défaut) ⇒ le parcours
+  candidat reste en démonstration (`MockCandidateApi`), sans configuration —
+  c'est le seul moyen de conserver la démo hors ligne ;
+- `EXPO_PUBLIC_USE_MOCKS_CANDIDATE=false` ⇒ `HttpCandidateApi` est instancié
+  **obligatoirement**, même si `EXPO_PUBLIC_API_BASE_URL` est vide ou injoignable :
+  chaque appel renvoie un `Result` `serveur` « L'API OMDA n'est pas configurée
+  (EXPO_PUBLIC_API_BASE_URL)… » (`MESSAGE_API_NON_CONFIGURE`), sans exception et
+  sans appel réseau (garde en tête de `demander()` et de `televerserFichier()`).
 
-Ce garde-fou évite d'instancier `HttpCandidateApi` sans serveur à joindre : aucun
-écran ne peut afficher le refus « L'API OMDA n'est pas configurée
-(EXPO_PUBLIC_API_BASE_URL)… ». Le parcours adhésion / suivi / paiement continue
-donc de fonctionner avec ses données de démonstration pendant que le parcours
-membre est déjà branché sur Supabase.
-
-**Aucun crash si la base URL est vide** (vérifié par script, étape 25) : même si
-`HttpCandidateApi` était instancié à la main, aucune méthode ne lève
-d'exception — `demander()` et `televerserFichier()` renvoient immédiatement un
-`Result` `serveur` « L'API OMDA n'est pas configurée (EXPO_PUBLIC_API_BASE_URL)… »,
-sans aucun appel réseau. Le parcours candidat reste donc utilisable et
-l'application ne plante jamais, même sans configuration.
+Les écrans candidat / adhésion affichent cette erreur via `ErrorState` +
+« Réessayer » (chargement → erreur → retry) : aucun crash, jamais de succès ni de
+données inventées. Pour repasser en démonstration : remettre le flag à `true`
+(ou le supprimer) puis redémarrer Metro (`npx expo start -c`).
 
 ### 2.4 Sélection effectuée par la fabrique
 
@@ -217,9 +218,13 @@ l'éditeur SQL de Supabase** (Dashboard Supabase → **SQL Editor** →
    qu'il reste un squelette, passer `EXPO_PUBLIC_USE_MOCKS_MEMBER=false` bascule
    AUSSI les contenus publics (documentation, tarifs, catégories) sur ce
    squelette : ils renverront un refus « non branché ».
-3. Branchement effectif des écrans/contextes sur `src/services/factory.ts`
-   (aujourd'hui ils consomment encore le barrel `src/services/mocks`, dont le
-   comportement est identique en mode mock).
+3. Branchement effectif des écrans/contextes sur `src/services/factory.ts` :
+   les écrans **candidat / adhésion** sont raccordés depuis l'étape 26 (ils
+   consomment le singleton `candidateApi` de la fabrique, mock ou réel selon le
+   flag) ; il reste les écrans **membre** et **publics**, qui consomment encore
+   le barrel `src/services/mocks` (`mockMemberRepository`,
+   `mockPublicContentService`, `mockAuthService`) — comportement identique en
+   mode mock, à raccorder avant le branchement Supabase effectif des écrans.
 
 ---
 
@@ -229,8 +234,8 @@ l'éditeur SQL de Supabase** (Dashboard Supabase → **SQL Editor** →
 |---|---|
 | Bannière « Service réel pas encore branché… » | Un parcours est en réel alors que son implémentation est encore un squelette (typiquement `EXPO_PUBLIC_USE_MOCKS_MEMBER=false` et les contenus publics) |
 | « Supabase n'est pas configuré… » | `EXPO_PUBLIC_SUPABASE_URL` ou `EXPO_PUBLIC_SUPABASE_ANON_KEY` vide alors que le parcours membre est en réel |
-| « L'API OMDA n'est pas configurée… » | `HttpCandidateApi` utilisé sans `EXPO_PUBLIC_API_BASE_URL` (impossible via la fabrique : le candidat reste alors en mock) |
-| Le parcours candidat reste en mock | `EXPO_PUBLIC_API_BASE_URL` vide, ou `EXPO_PUBLIC_USE_MOCKS_CANDIDATE` pas passée à `false` |
+| « L'API OMDA n'est pas configurée… » | Parcours candidat en réel (`EXPO_PUBLIC_USE_MOCKS_CANDIDATE=false`) sans `EXPO_PUBLIC_API_BASE_URL` : renseigner l'URL, ou repasser le flag à `true` pour la démonstration (étape 26 : plus de repli mock) |
+| Le parcours candidat reste en mock | `EXPO_PUBLIC_USE_MOCKS_CANDIDATE` absente ou dont la valeur exacte n'est pas `false` (l'URL n'entre plus en jeu depuis l'étape 26) |
 | Le parcours membre reste en mock | `EXPO_PUBLIC_USE_MOCKS_MEMBER` absente et repli `EXPO_PUBLIC_USE_MOCKS` encore à `true` |
 | Les variables ne sont pas prises en compte | Metro n'a pas été redémarré (`npx expo start -c`) |
 

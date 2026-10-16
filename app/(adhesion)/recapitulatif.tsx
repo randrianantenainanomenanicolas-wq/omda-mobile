@@ -17,7 +17,8 @@ import { useAdhesionDraft, type AdhesionDraft } from '../../src/context/Adhesion
 import type { Categorie, TypePiece } from '../../src/models';
 import type { ErreurApp } from '../../src/services/contracts';
 import { enregistrerDossierSoumis } from '../../src/services/local/historiqueDossiers';
-import { mockCandidateApi, mockPublicContentService } from '../../src/services/mocks';
+import { candidateApi } from '../../src/services/factory';
+import { mockPublicContentService } from '../../src/services/mocks';
 
 type EtatEcran = 'chargement' | 'erreur' | 'vide' | 'contenu';
 
@@ -339,7 +340,7 @@ export default function RecapitulatifScreen() {
       let codeSuivi = brouillon.code_suivi;
 
       if (!numeroDossier || !codeSuivi) {
-        const creation = await mockCandidateApi.creerDemande({
+        const creation = await candidateApi.creerDemande({
           identite: {
             nom: brouillon.identite.nom.trim(),
             prenom: brouillon.identite.prenom.trim(),
@@ -363,7 +364,7 @@ export default function RecapitulatifScreen() {
       }
 
       // 2. Envoi du dossier complet (statut ENVOYEE, délai indicatif, aucun paiement).
-      const envoi = await mockCandidateApi.soumettreDemande({
+      const envoi = await candidateApi.soumettreDemande({
         numero_dossier: numeroDossier,
         code_suivi: codeSuivi,
         categorie_id: categorieRetenue.id,

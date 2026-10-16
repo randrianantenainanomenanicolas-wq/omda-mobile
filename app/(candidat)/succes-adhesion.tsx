@@ -14,7 +14,7 @@ import {
 } from '../../src/components/ui';
 import type { StatutPaiement } from '../../src/models';
 import type { ErreurApp, EtatPaiementCandidat } from '../../src/services/contracts';
-import { mockCandidateApi } from '../../src/services/mocks';
+import { candidateApi } from '../../src/services/factory';
 
 /**
  * Écran O — Succès d’adhésion (public, sans menu).
@@ -115,7 +115,7 @@ export default function SuccesAdhesionScreen() {
       return;
     }
 
-    const reponse = await mockCandidateApi.obtenirEtatPaiement(referenceInterne);
+    const reponse = await candidateApi.obtenirEtatPaiement(referenceInterne);
 
     if (!monteRef.current) return;
 

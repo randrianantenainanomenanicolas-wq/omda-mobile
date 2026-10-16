@@ -25,8 +25,8 @@ import {
   type TypeMime,
 } from '../../src/models';
 import type { ErreurApp, FichierDepose } from '../../src/services/contracts';
+import { candidateApi } from '../../src/services/factory';
 import {
-  mockCandidateApi,
   mockMemberRepository,
   mockPublicContentService,
 } from '../../src/services/mocks';
@@ -265,7 +265,7 @@ function oeuvreVide(): OeuvreEnCours {
  * progression visible, reprise sur erreur (coupure réseau), remplacement et
  * suppression (confirmée par `UploadTile`) d'un fichier, retrait d'une ligne
  * d'œuvre confirmé DANS l'écran (aucun `Alert`). Les envois passent par
- * `mockCandidateApi.televerserFichier` (même contrat que l'API réelle).
+ * `candidateApi.televerserFichier` (contrat unique : mock ou réel via la fabrique).
  *
  * Paramètres d'entrée : `categorie_id` (obligatoire) + `categorie_libelle`.
  * Revalide la catégorie au chargement (catégorie retirée du référentiel ou
@@ -442,7 +442,7 @@ export default function DemanderCategorieOeuvresScreen() {
         erreur: null,
       });
 
-      const resultat = await mockCandidateApi.televerserFichier(
+      const resultat = await candidateApi.televerserFichier(
         {
           bucket: BUCKET_OEUVRES,
           chemin_stockage: cheminStockage(cible.nature, selection.nom),

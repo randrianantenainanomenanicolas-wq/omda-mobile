@@ -14,10 +14,11 @@
  *   une variable absente ou vide, conserve les mocks ;
  * - `EXPO_PUBLIC_USE_MOCKS` reste le REPLI des deux parcours quand la variable
  *   dédiée n'est pas définie (compatibilité avec les `.env` déjà en place) ;
- * - parcours CANDIDAT : même avec `EXPO_PUBLIC_USE_MOCKS_CANDIDATE=false`, le
- *   mock est CONSERVÉ tant que `EXPO_PUBLIC_API_BASE_URL` est vide — sans API
- *   Express à joindre, `HttpCandidateApi` ne produirait que des erreurs de
- *   transport. Le parcours candidat reste donc fonctionnel en démonstration ;
+ * - parcours CANDIDAT : `EXPO_PUBLIC_USE_MOCKS_CANDIDATE=false` instancie
+ *   `HttpCandidateApi` OBLIGATOIREMENT (étape 26 : plus aucun repli mock) —
+ *   même si `EXPO_PUBLIC_API_BASE_URL` est vide : chaque appel renvoie alors un
+ *   `Result` `serveur` (« L'API OMDA n'est pas configurée… »), sans exception
+ *   ni appel réseau ; le flag est donc le SEUL sélecteur de ce parcours ;
  * - parcours MEMBRE : `authService`, `memberRepository` ET
  *   `publicContentService` suivent le même flag (les contenus publics sont des
  *   tables Supabase `documentation` / `categorie` / `tarif` /
@@ -80,7 +81,12 @@ export function estModeMockActif(): boolean {
   return REPLI_MOCK;
 }
 
-/** Vrai si l'API REST du parcours candidat est renseignée (`EXPO_PUBLIC_API_BASE_URL`). */
+/**
+ * Vrai si l'API REST du parcours candidat est renseignée (`EXPO_PUBLIC_API_BASE_URL`).
+ * Diagnostic seul (écran dev `/dev/env`) : ne pilote PLUS la sélection du
+ * service (étape 26 — le flag `EXPO_PUBLIC_USE_MOCKS_CANDIDATE` est le seul
+ * sélecteur mock ⇄ réel du parcours candidat).
+ */
 export function estApiCandidatConfiguree(): boolean {
   return API_BASE_URL_CANDIDAT.length > 0;
 }
@@ -95,19 +101,19 @@ export function estModeMockMembre(): boolean {
 
 /**
  * Vrai si le parcours CANDIDAT reste en mock : `EXPO_PUBLIC_USE_MOCKS_CANDIDATE`
- * si elle est définie, sinon repli historique — et MOCK OBLIGATOIRE tant que
- * `EXPO_PUBLIC_API_BASE_URL` est vide (aucune API Express à joindre).
+ * si elle est définie, sinon repli historique. Le flag est le SEUL sélecteur
+ * (étape 26) : `false` ⇒ `HttpCandidateApi` même sans `EXPO_PUBLIC_API_BASE_URL`
+ * (erreur `serveur` typée à chaque appel, aucun repli sur le mock).
  */
 export function estModeMockCandidat(): boolean {
-  const choix = DRAPEAU_CANDIDAT ?? REPLI_MOCK;
-  return choix || !estApiCandidatConfiguree();
+  return DRAPEAU_CANDIDAT ?? REPLI_MOCK;
 }
 
 /* --------------------------------------------------------------- Singletons */
 
 /** Parcours membre : les 3 services suivent le MÊME flag. */
 const membreEnMock = estModeMockMembre();
-/** Parcours candidat : mock si le flag le demande OU si l'API n'est pas configurée. */
+/** Parcours candidat : mock si et seulement si le flag le demande (étape 26 : plus de repli sur l'absence d'URL). */
 const candidatEnMock = estModeMockCandidat();
 
 /** Authentification du membre (mock ⇄ Supabase Auth). */
@@ -123,5 +129,9 @@ export const publicContentService: PublicContentService = membreEnMock
   ? mockPublicContentService
   : new SupabasePublicContentService();
 
-/** API candidate (mock ⇄ API REST Express via `EXPO_PUBLIC_API_BASE_URL`). */
+/**
+ * API candidate : mock si le flag le demande, sinon API REST Express via
+ * `EXPO_PUBLIC_API_BASE_URL` — URL vide ⇒ `Result` `serveur` typé à chaque
+ * appel (« L'API OMDA n'est pas configurée… »), jamais d'exception (étape 26).
+ */
 export const candidateApi: CandidateApi = candidatEnMock ? mockCandidateApi : new HttpCandidateApi();

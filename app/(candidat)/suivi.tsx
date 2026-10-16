@@ -20,7 +20,7 @@ import {
 import type { StatutDemande } from '../../src/models';
 import type { ErreurApp, SuiviDemande } from '../../src/services/contracts';
 import { obtenirHistoriqueDossiers } from '../../src/services/local/historiqueDossiers';
-import { mockCandidateApi } from '../../src/services/mocks';
+import { candidateApi } from '../../src/services/factory';
 
 type EtatEcran = 'vide' | 'chargement' | 'erreur' | 'contenu';
 
@@ -115,7 +115,7 @@ export default function SuiviScreen() {
     setEtat('chargement');
     setErreurRecherche(null);
 
-    const reponse = await mockCandidateApi.suivreDemande({
+    const reponse = await candidateApi.suivreDemande({
       numero_dossier: numeroNettoye,
       code_suivi: codeNettoye,
     });

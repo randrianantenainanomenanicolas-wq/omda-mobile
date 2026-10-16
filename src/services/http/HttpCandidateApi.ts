@@ -15,8 +15,12 @@
  * `motif_rejet`, `VALIDEE` exige `paiement_du`, seuls le mode `MOBILE_MONEY`
  * (MVola) et la devise `MGA` sont admis — aucun virement n'existe ici.
  *
- * Le mode mock reste le défaut : cette classe n'est instanciée que si
- * `EXPO_PUBLIC_USE_MOCKS=false` (cf. `src/services/factory.ts`).
+ * Le mode mock reste le défaut : la fabrique n'instancie cette classe que si
+ * `EXPO_PUBLIC_USE_MOCKS_CANDIDATE=false` — auquel cas elle l'est
+ * OBLIGATOIREMENT, même sans `EXPO_PUBLIC_API_BASE_URL` (étape 26 : aucun
+ * repli mock ; chaque appel renvoie alors un `Result` `serveur` « API non
+ * configurée », garde en tête de `demander()` et de `televerserFichier()`,
+ * sans exception ni appel réseau).
  */
 import {
   CODE_DEVISE_MGA,

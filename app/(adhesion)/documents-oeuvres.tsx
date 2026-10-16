@@ -35,7 +35,8 @@ import type {
   OeuvreAdhesionEntree,
   PieceEntree,
 } from '../../src/services/contracts';
-import { mockCandidateApi, mockPublicContentService } from '../../src/services/mocks';
+import { candidateApi } from '../../src/services/factory';
+import { mockPublicContentService } from '../../src/services/mocks';
 import {
   AIDE_ATTESTATION_FORMATS,
   MESSAGE_ATTESTATION_FORMAT_INVALIDE,
@@ -299,7 +300,8 @@ function messageEnvoi(envoi: EnvoiFichier, aide: string): string {
  * progression visible, reprise sur erreur (coupure réseau), remplacement d'un
  * fichier déjà envoyé et suppression confirmée tant que la demande n'est pas
  * envoyée, annulation sans perte de la saisie. Les envois passent par
- * `mockCandidateApi.televerserFichier` (même contrat que l'API réelle) et sont
+ * `candidateApi.televerserFichier` (contrat unique : mock ou réel via la
+ * fabrique) et sont
  * affichés par `UploadTile`.
  *
  * Gère les 4 états obligatoires : Loading (brouillon + catégories),
@@ -581,7 +583,7 @@ export default function DocumentsOeuvresScreen() {
         erreur: null,
       });
 
-      const resultat = await mockCandidateApi.televerserFichier(
+      const resultat = await candidateApi.televerserFichier(
         {
           bucket,
           chemin_stockage: cheminStockage(bucket, dossier, selection.nom),
