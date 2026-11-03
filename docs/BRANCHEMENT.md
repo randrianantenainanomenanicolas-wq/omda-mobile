@@ -107,6 +107,13 @@ Les écrans candidat / adhésion affichent cette erreur via `ErrorState` +
 données inventées. Pour repasser en démonstration : remettre le flag à `true`
 (ou le supprimer) puis redémarrer Metro (`npx expo start -c`).
 
+Paiement : le contrat v1.1 n'accepte que **Mobile Money (MVola)**. Même avec
+l'API Express configurée, `initierPaiement` refuse localement, avant tout appel
+réseau :
+- mode de paiement différent de `MOBILE_MONEY` → `MODE_PAIEMENT_INVALIDE` ;
+- opérateur absent ou différent de `MVOLA` → `OPERATEUR_INDISPONIBLE`.
+Ces refus utilisent les mêmes codes et messages que le parcours mock (`simulerPaiement`) et sont documentés dans `docs/API_CANDIDAT.md` (§5.7, §9).
+
 ### 2.4 Sélection effectuée par la fabrique
 
 | Singleton exporté | Parcours | Mode mock (défaut) | Mode réel |
@@ -154,6 +161,14 @@ Contraintes déjà appliquées côté application : **20 Mo maximum** par fichie
 attestation de diffusion limitée à **`application/pdf`, `image/jpeg`,
 `image/png`** (`TYPES_MIME_ATTESTATION`) ; le fichier d'œuvre accepte en plus
 l'audio (`audio/mpeg`, `audio/wav`).
+
+Contrôle pré-envoi de `televerserFichier` (§5.3 du contrat) : le type MIME du
+fichier est vérifié contre `TYPES_MIME_AUTORISES[bucket]` (`pieces` = JPEG/PNG/PDF ;
+`oeuvres` = + MP3/WAV) ⇒ `TYPE_FICHIER_NON_AUTORISE`, puis la taille est
+contrôlée contre **20 Mo** (`TAILLE_MAX_FICHIER_OCTETS`) ⇒
+`FICHIER_TROP_VOLUMINEUX` — même ordre, mêmes codes et mêmes messages que
+`simulerTeleversement` dans `src/services/mocks/etatMock.ts`, refus avant tout
+envoi au serveur.
 
 ---
 

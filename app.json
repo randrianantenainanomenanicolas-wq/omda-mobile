@@ -23,11 +23,6 @@
       "bundler": "metro",
       "favicon": "./assets/favicon.png"
     },
-    "splash": {
-      "image": "./assets/splash.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#F5F4EF"
-    },
     "plugins": [
       "expo-router",
       "expo-audio",
@@ -40,7 +35,8 @@
           "backgroundColor": "#F5F4EF"
         }
       ],
-      "expo-secure-store"
+      "expo-secure-store",
+      "expo-asset"
     ]
   }
 }
