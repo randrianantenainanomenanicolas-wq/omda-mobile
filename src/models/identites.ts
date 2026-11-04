@@ -35,11 +35,16 @@ export type Candidat = {
   id: UUID;
   nom: string;
   prenom: string;
+  pseudonyme: string;
+  groupe: string;
   cin: string;
   date_naissance: DateISO;
   telephone: string;
   email: string;
   adresse: string;
+  ancien_chef_lieu_province_id: UUID | null;
+  territoire: string;
+  compte_bancaire: string | null;
   utilisateur_id: UUID | null;
   created_at: HorodatageISO;
   updated_at: HorodatageISO;
@@ -53,6 +58,9 @@ export type Membre = {
   id: UUID;
   utilisateur_id: UUID;
   candidat_id: UUID;
+  // OBSOLETE (étape 28) : conservé pour rétrocompatibilité.
+  // Remplacé par MembreCategorie.numero_omda (attribué côté serveur, par catégorie, à la validation).
+  // Suppression prévue à l'étape 29.
   numero_adherent: string;
   statut: StatutUtilisateur;
   created_at: HorodatageISO;
@@ -69,6 +77,7 @@ export type MembreCategorie = {
   membre_id: UUID;
   categorie_id: UUID;
   demande_adhesion_id: UUID | null;
+  numero_omda: string | null;
   statut: StatutAdhesionCategorie;
   date_activation: HorodatageISO;
 };

@@ -1,12 +1,13 @@
 # OMDA — Contrat REST de l'API Candidat (proposition)
 
-Version : 1.1 — cible : API Node/Express consommée par l'application mobile pour le
+Version : 1.2 — cible : API Node/Express consommée par l'application mobile pour le
 parcours **visiteur / candidat** (utilisateur SANS compte).
 
-> **v1.1** — implémenté côté mobile par `src/services/http/HttpCandidateApi.ts`
+> **v1.2** — implémenté côté mobile par `src/services/http/HttpCandidateApi.ts`
 > (étape 19) : §5.3 adapté au dépôt **préalable** à la création du dossier ;
-> contrôles client ajoutés au §9. Le fond n'a pas changé : **Mobile Money
-> (MVola) reste le seul mode de paiement, aucun virement n'existe.**
+> contrôles client ajoutés au §9. Trois opérateurs Mobile Money (MVola, Orange
+> Money, Airtel Money) servis par `operateur_mobile_money`, jamais codés en dur.
+> Les paiements réels restent hors périmètre.
 
 > Ce document décrit le contrat HTTP que l'implémentation `HttpCandidateApi`
 > (étape 19) respecte. Il correspond au contrat TypeScript
@@ -432,7 +433,8 @@ liste ; l'UI ne codifie aucun montant, opérateur ou tarif (règle AI_RULES).
 3. `REUSSI` **uniquement** sur confirmation externe (webhook Mobile Money MVola)
    + `date_confirmation_serveur` — jamais de succès immédiat.
 4. Liste des opérateurs/modes strictement **dynamique** (désactivé = absent) ;
-   seul mode : `MOBILE_MONEY` (MVola, opérateur non sélectionnable dans l'UI).
+   mode : `MOBILE_MONEY` ; opérateurs : `MVOLA`, `ORANGE_MONEY`, `AIRTEL_MONEY`
+   (affichés en information, non sélectionnables un par un dans l'UI).
 5. `motif_rejet` obligatoire dès que `statut = 'REJETEE'`.
 6. Upload : **20 Mo max**, MIME restreints par bucket, progression/retry gérés
    par le client, rejeu possible après coupure réseau (Idempotency-Key sur l'envoi).
@@ -457,12 +459,12 @@ liste ; l'UI ne codifie aucun montant, opérateur ou tarif (règle AI_RULES).
   ⇒ `serveur` ; contrôles à la lecture : `REJETEE` exige `motif_rejet`,
   `VALIDEE` exige `paiement_du`, `REUSSI` exige `date_confirmation`,
   `ECHEC_*`/`REJETE` exige `motif_echec`, `mode` doit valoir `MOBILE_MONEY` et
-  `operateur` `MVOLA` (toute autre valeur, y compris un virement, est refusée),
+  `operateur` `MVOLA`, `ORANGE_MONEY` ou `AIRTEL_MONEY` (toute autre valeur, y compris un virement, est refusée),
   un opérateur `actif = false` est écarté de la réponse ;
 - `Idempotency-Key` (UUID v4) envoyée sur `POST /v1/paiements` et
   `POST /v1/demandes/{numero_dossier}/envoi` ;
 - bascule : `MockCandidateApi` reste le **défaut** ; seule la valeur exacte
-  `EXPO_PUBLIC_USE_MOCKS=false` instancie `HttpCandidateApi`
+  `EXPO_PUBLIC_USE_MOCKS_CANDIDATE=false` instancie `HttpCandidateApi`
   (`src/services/factory.ts`).
 
 > **Périmètre** : ce contrat couvre uniquement le parcours candidat/visiteur.

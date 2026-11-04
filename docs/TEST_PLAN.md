@@ -14,7 +14,7 @@
 | T2 | 4 états obligatoires | Chaque écran data-driven affiche : chargement / erreur + « Réessayer » / vide / contenu |
 | T3 | Règle du vert | Le vert (`status-success` / `circle-check`) n'apparaît qu'après une **confirmation serveur** (paiement `REUSSI`, cotisation `PAYEE`, œuvre `DEPOT_FINALISE`, session ouverte) ; jamais collé au bouton « Payer » |
 | T4 | Aucune valeur en dur | Montants, tarifs, catégories, opérateurs et statuts viennent toujours d'un service (jamais de l'UI) |
-| T5 | Paiement | **Mobile Money MVola uniquement** : mode et opérateur affichés en information, **non sélectionnables** ; aucun virement |
+| T5 | Paiement | **Mobile Money (3 opérateurs : MVola, Orange Money, Airtel Money)** : mode et opérateurs affichés en information, **non sélectionnables un par un** ; aucun virement |
 | T6 | Langue | Français, vouvoiement ; devise Ariary (Ar) |
 | T7 | Montants | Le montant affiché provient **toujours** du service (écran de paiement comme écran de tarifs) |
 
@@ -191,7 +191,23 @@ Les fonctions ci-dessous se déclenchent depuis le code (appelées dans `tools/v
 
 > Ces réglages sont **éphémères en mémoire** : ils repartent de la configuration nominale au redémarrage de l'application, ce qui évite tout effet de bord sur les autres scénarios.
 
-## 11) Récapitulatif de campagne de tests
+## 11) Nouvelles règles étape 28 — formulaires, tarifs, opérateurs, numéro OMDA
+
+| # | Scénario | Résultat attendu |
+|---|----------|------------------|
+| 11.1 | Écran catégorie : 5 catégories affichées dans l'ordre | Musique → Littéraire → Dramatique → Audiovisuel → Figuratif (jamais un autre ordre) |
+| 11.2 | Écran tarifs : ADHESION nouvel adhérent | 20 000 Ar fourni par le service (jamais codé en dur) |
+| 11.3 | Écran tarifs : ADHESION membre existant, nouvelle catégorie | 10 000 Ar fourni par le service |
+| 11.4 | Écran tarifs : DEPOT_OEUVRE par catégorie | Musique 1 000 / Littéraire Livre 1 000 / Littéraire Poème 500 / Dramatique 1 000 / Audiovisuel 1 000 / Figuratif 500 |
+| 11.5 | Paiement : 3 opérateurs listés | MVola, Orange Money, Airtel Money affichés (dynamique depuis `operateur_mobile_money`) |
+| 11.6 | Parcours candidat : selfie CIN | Disponible uniquement en toute dernière étape, après (1) bloc œuvre, (2) photo, (3) CIN, (4) acte de naissance, (5) certificat de résidence ; « Envoyer ma demande » bloqué tant que le selfie n'est pas déposé |
+| 11.7 | Soumission d'œuvre par un membre | Écran de confirmation par ressaisie du mot de passe actuel ; sans autorisation valide, l'œuvre reste « Brouillon » |
+| 11.8 | Fiche d'adhésion : compte bancaire | Champ présent, non bloquant, mai être laissé vide |
+| 11.9 | Fiche d'adhésion : territoire | « Madagascar et le monde entier », affiché en lecture seule, non modifiable |
+| 11.10 | Bulletin littéraire / dramatique | Libellés « Parolier » et « Parole ou partition » affichés tels quels |
+| 11.11 | Bulletin Figuratif | Marqué « à confirmer », champs communs uniquement, aucun champ inventé |
+
+## 12) Récapitulatif de campagne de tests
 
 | Bloc | Scénarios | Statut |
 | --- | --- | --- |
@@ -206,6 +222,7 @@ Les fonctions ci-dessous se déclenchent depuis le code (appelées dans `tools/v
 | §8 Catégorie supplémentaire | 10 cas | ☐ |
 | §9 Cotisation | 6 cas | ☐ |
 | §10 Panne / simulations | 6 cas | ☐ |
+| §11 Nouvelles règles étape 28 | 11 cas | ☐ |
 
 **Critères de sortie d'une campagne** : tous les scénarios ci-dessus au vert, `npx tsc --noEmit` sans erreur, `npx --yes tsx tools/verif-mocks.ts` → « TOUS LES CONTROLES SONT PASSES ». Toute anomalie est consignée avec son numéro de scénario dans le rapport de recette.
 

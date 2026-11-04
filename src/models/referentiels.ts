@@ -1,5 +1,5 @@
 import type { CodeDevise, DateISO, HorodatageISO, MontantAriary, UUID } from './common';
-import type { OperateurPaiement, TypeOperationTarif } from './enums';
+import type { OperateurPaiement, TypeBulletin, TypeOperationTarif } from './enums';
 
 /** Référentiel des catégories d'adhésion — table `categorie`. */
 export type Categorie = {
@@ -8,6 +8,9 @@ export type Categorie = {
   code: string;
   libelle: string;
   description: string | null;
+  /** Ordre d'affichage : 1=Musique, 2=Littéraire, 3=Dramatique, 4=Audiovisuel, 5=Figuratif. */
+  ordre: number;
+  type_bulletin: TypeBulletin;
   actif: boolean;
   created_at: HorodatageISO;
   updated_at: HorodatageISO;
@@ -53,5 +56,43 @@ export type OperateurMobileMoney = {
   libelle: string;
   actif: boolean;
   ordre: number;
+  updated_at: HorodatageISO;
+};
+
+/** Ancien chef-lieu de province — table `ancien_chef_lieu_province`.
+ * Liste de référence, servie par le service, jamais codée dans l'écran.
+ */
+export type AncienChefLieuProvince = {
+  id: UUID;
+  libelle: string;
+  ordre: number;
+  actif: boolean;
+  created_at: HorodatageISO;
+  updated_at: HorodatageISO;
+};
+
+/** Autorisation de soumission d'œuvre — table `autorisation_soumission_oeuvre`.
+ * Usage unique, liée au membre et au brouillon, hachée, expiration 10 min.
+ */
+export type AutorisationSoumissionOeuvre = {
+  id: UUID;
+  membre_id: UUID;
+  oeuvre_brouillon_id: UUID;
+  jeton_hash: string;
+  expire_at: HorodatageISO;
+  utilisee: boolean;
+  created_at: HorodatageISO;
+};
+
+/** Compteur d'échecs de confirmation par mot de passe — table `compteur_echecs_mot_de_passe`.
+ * Par membre, réinitialisé à la connexion réussie.
+ */
+export type CompteurEchecsMotDePasse = {
+  id: UUID;
+  membre_id: UUID;
+  nb_echecs: number;
+  dernier_echec_at: HorodatageISO | null;
+  reset_at: HorodatageISO;
+  created_at: HorodatageISO;
   updated_at: HorodatageISO;
 };

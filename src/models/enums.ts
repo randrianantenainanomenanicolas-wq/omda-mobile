@@ -62,8 +62,25 @@ export const TYPES_PIECE = [
   'CERTIFICAT_RESIDENCE',
   'AUTORISATION_PARENTALE',
   'AUTRE',
+  'OEUVRE',
+  'ATTESTATION_DIFFUSION',
+  'BULLETIN',
+  'SELFIE_CIN',
 ] as const;
 export type TypePiece = (typeof TYPES_PIECE)[number];
+
+/** Types de pièces du parcours candidat, dans l'ordre d'import imposé. */
+export const TYPES_PIECE_CANDIDAT = [
+  'OEUVRE',
+  'ATTESTATION_DIFFUSION',
+  'BULLETIN',
+  'PHOTO',
+  'CIN',
+  'ACTE_NAISSANCE',
+  'CERTIFICAT_RESIDENCE',
+  'SELFIE_CIN',
+] as const;
+export type TypePieceCandidat = (typeof TYPES_PIECE_CANDIDAT)[number];
 
 /* -------------------------------------------------------------------- Œuvres */
 
@@ -101,12 +118,12 @@ export type TypePaiement = (typeof TYPES_PAIEMENT)[number];
 export const TYPES_OPERATION_TARIF = ['ADHESION', 'DEPOT_OEUVRE', 'COTISATION'] as const;
 export type TypeOperationTarif = (typeof TYPES_OPERATION_TARIF)[number];
 
-/** Mode unique de l'application : Mobile Money (MVola). */
+/** Mode de paiement : Mobile Money. */
 export const MODES_PAIEMENT = ['MOBILE_MONEY'] as const;
 export type ModePaiement = (typeof MODES_PAIEMENT)[number];
 
-/** Opérateur unique — table `operateur_paiement` (MVola uniquement). */
-export const OPERATEURS_PAIEMENT = ['MVOLA'] as const;
+/** Opérateurs Mobile Money (3 opérateurs au choix, servis par la table `operateur_mobile_money`). */
+export const OPERATEURS_PAIEMENT = ['MVOLA', 'ORANGE_MONEY', 'AIRTEL_MONEY'] as const;
 export type OperateurPaiement = (typeof OPERATEURS_PAIEMENT)[number];
 
 export const STATUTS_PAIEMENT = [
@@ -137,3 +154,18 @@ export const TYPES_NOTIFICATION = [
   'GLOBALE',
 ] as const;
 export type TypeNotification = (typeof TYPES_NOTIFICATION)[number];
+
+/* -------------------------------------------------------------- Bulletins */
+
+export const TYPES_BULLETIN = [
+  'LITTERAIRE',
+  'DRAMATIQUE',
+  'MUSIQUE_ACR',
+  'MUSIQUE_COLLECTIVE',
+  'AUDIOVISUEL',
+  'FIGURATIF_PROVISOIRE',
+] as const;
+export type TypeBulletin = (typeof TYPES_BULLETIN)[number];
+
+export const TYPES_LITTERAIRE = ['LIVRE', 'POEME'] as const;
+export type TypeLitteraire = (typeof TYPES_LITTERAIRE)[number];

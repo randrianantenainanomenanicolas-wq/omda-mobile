@@ -44,22 +44,34 @@ Données de `membre@omda.mg` : n° d'adhérent `OMDA-2026-A-000123`, catégorie 
 | +261340000003 | `ECHEC_AUTRE` | Échec technique de l'opérateur |
 | +261340000004 | `REJETE` | Annulé par le titulaire |
 
-Tout autre numéro `+261…` → `REUSSI`. **Seul opérateur : MVola** (unique du schéma, non sélectionnable dans l'UI) ; liste dynamique : s'il est désactivé côté « serveur » (`definirOperateurActif('MVOLA', false)`), la liste devient vide et aucun paiement n'est proposé.
+Tout autre numéro `+261…` → `REUSSI`. **Trois opérateurs : MVola, Orange Money, Airtel Money** (servis par `operateur_mobile_money`, non sélectionnables un par un dans l'UI — affichés en information) ; liste dynamique depuis le service.
 
-## Tarifs (Ariary, dynamiques via `estimerMontant`)
+## Tarifs (Ariary, dynamiques via `estimerMontant`, lus depuis la base — jamais codés en dur)
 
-| Opération | Montant |
-| --- | --- |
-| ADHESION (par défaut) | 150 000 Ar |
-| ADHESION — catégorie Musicien | 120 000 Ar |
-| DEPOT_OEUVRE | 50 000 Ar |
-| COTISATION | 100 000 Ar |
+| Opération | Catégorie | Montant |
+| --- | --- | --- |
+| ADHESION (nouvel adhérent) | — | 20 000 Ar |
+| ADHESION (membre existant, nouvelle catégorie) | Musique | 10 000 Ar |
+| ADHESION (membre existant, nouvelle catégorie) | Littéraire | 10 000 Ar |
+| ADHESION (membre existant, nouvelle catégorie) | Dramatique | 10 000 Ar |
+| ADHESION (membre existant, nouvelle catégorie) | Audiovisuel | 10 000 Ar |
+| ADHESION (membre existant, nouvelle catégorie) | Figuratif | 10 000 Ar |
+| DEPOT_OEUVRE | Musique | 1 000 Ar |
+| DEPOT_OEUVRE | Littéraire (Livre) | 1 000 Ar |
+| DEPOT_OEUVRE | Littéraire (Poème) | 500 Ar |
+| DEPOT_OEUVRE | Dramatique | 1 000 Ar |
+| DEPOT_OEUVRE | Audiovisuel | 1 000 Ar |
+| DEPOT_OEUVRE | Figuratif | 500 Ar |
 
 Toute estimation est affichée avec la mention : « Estimation — le montant final est confirmé par le serveur. »
 
 ## Autres référentiels
 
-- Catégories actives : Artiste-auteur, Écrivain, Musicien ; Arts numériques est désactivée (jamais listée).
+- Catégories actives (dans l'ordre) : Musique, Littéraire, Dramatique, Audiovisuel, Figuratif.
+- Types de bulletin : Littéraire, Dramatique, Musique ACR, Musique collective, Audiovisuel, Figuratif (provisoire).
+- Types littéraires : Livre, Poème.
+- Anciens chefs-lieux de province : Antananarivo, Antsiranana, Fianarantsoa, Mahajanga, Toamasina, Toliara.
+- Articles publiés : `devenir-membre`, `documents-a-fournir`, `vos-droits-d-auteur` ; `article-en-preparation` n'est jamais listé et renvoie `ARTICLE_INTROUVABLE`.
 - Articles publiés : `devenir-membre`, `documents-a-fournir`, `vos-droits-d-auteur` ; `article-en-preparation` n'est jamais listé et renvoie `ARTICLE_INTROUVABLE`.
 
 ## Codes d'erreur propres aux mocks (`CODES_MOCK`)

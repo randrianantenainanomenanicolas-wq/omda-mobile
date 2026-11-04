@@ -7,6 +7,25 @@
 - Couleurs : uniquement via tokens NativeWind (omda-* et status-*). Pas de couleurs hex dans les composants.
 - Le vert (status-success) = succès confirmé serveur uniquement. Jamais près de “Payer” avant REUSSI confirmé.
 - Aucun montant/catégorie/opérateur/tarif codé en dur dans l’UI : tout vient d’un service (mockable).
+- 5 catégories dans l’ordre : Musique, Littéraire, Dramatique, Audiovisuel, Figuratif. Jamais d’autre ordre.
+- Opérateurs de paiement : MVola, Orange Money, Airtel Money (3 au choix, servis par `operateur_mobile_money`). Paiements réels hors périmètre.
+- Compte bancaire : facultatif, jamais bloquant, donnée sensible (RLS stricte, jamais journalisé).
+- Territoire : valeur fixe « Madagascar et le monde entier », automatique, non modifiable.
+- « Lieu de réception du droit » : exclu de l’application.
+- Pas de signature manuscrite ni signature papier en agence : déclaration sur l’honneur cochée + mention « voavaky sy ankatoavina » saisie.
+- Pseudonyme obligatoire à toute adhésion, conservable entre catégories, aucune unicité.
+- Groupe obligatoire (le pseudonyme peut le remplacer).
+- Ancien chef-lieu de province : liste de référence en base, juste après l’adresse, servie par le service (jamais codée dans l’écran).
+- Libellés « Parolier » et « Parole ou partition » (Littéraire, Dramatique) conservés tels quels.
+- Figuratif : formulaire d’adhésion commun et bulletin minimal provisoires, marqués « à confirmer », aucun champ inventé.
+- Cadre réservé OMDA (numéro OMDA, date d’adhésion, numéro de l’œuvre) attribué côté serveur, jamais saisi.
+- Numéro OMDA par catégorie attribué à la validation, côté serveur uniquement. Un seul compte utilisateur par auteur.
+- Attestation de diffusion : obligatoire pour chaque œuvre en nouvelle catégorie, facultative si déjà membre de la catégorie. Bulletin toujours obligatoire.
+- Parcours candidat : tous les documents obligatoires. Ordre d’import : (1) bloc par œuvre (fichier + attestation + bulletin), (2) photo, (3) CIN, (4) acte de naissance, (5) certificat de résidence ; selfie avec CIN en toute dernière étape, sans lequel l’envoi est bloqué (contrôle aussi côté serveur).
+- Fichiers : renommage automatique, compression, conversion JPG/PNG. Musique : MP3 + PDF de paroles. Film : PDF de résumé.
+- Notifications écrites uniquement côté serveur ; l’app n’en fabrique jamais ; pas de boîte de notifications candidat ; push hors périmètre.
+- Soumission d’une œuvre par un membre : confirmation par ressaisie du mot de passe actuel (côté serveur), SMS abandonné. Sans autorisation valide, l’œuvre reste « Brouillon ».
+- Jamais de clé `service_role` dans l’app ni de secret dans le code client.
 - Chaque écran data-driven : Loading / Erreur + “Réessayer” / Vide / Contenu.
 - Ne faire QUE l’étape demandée (pas d’anticipation).
 - À la fin de l’étape : mettre à jour docs/PROGRESS.md + vérifier `npx tsc --noEmit`.
