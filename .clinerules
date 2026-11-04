@@ -1,0 +1,23 @@
+Projet OMDA Mobile. Au début de chaque tâche, lis docs/AI_RULES.md, docs/PROGRESS.md (notes récentes), docs/BRANCHEMENT.md, docs/API_CANDIDAT.md, docs/SCHEMA_DB.md, docs/REGLES_METIER_V2.md et, s'il existe, docs/FORMULAIRES.md. REGLES_METIER_V2.md prime sur les autres docs en cas de contradiction ; une fois les règles intégrées dans les docs, ceux-ci font foi.
+
+RÈGLES MÉTIER (détail dans REGLES_METIER_V2.md) :
+1. 5 catégories, toujours dans l'ordre Musique, Littéraire, Dramatique, Audiovisuel, Figuratif. Montants (frais d'adhésion, frais de déclaration par titre) toujours lus depuis la base, jamais codés en dur.
+2. Opérateurs de paiement au choix (MVola, Orange Money, Airtel Money) servis par operateur_mobile_money. Les paiements réels sont HORS périmètre pour l'instant.
+3. Fiche d'adhésion et bulletins de déclaration : formulaires NATIFS remplis dans l'app (PDF de référence dans docs/formulaires/), données structurées dans Supabase + PDF récapitulatif dans Storage. Ni signature manuscrite ni signature papier en agence : déclaration sur l'honneur cochée + mention « voavaky sy ankatoavina » saisie. « Lieu de réception du droit » EXCLU de l'app. Compte bancaire FACULTATIF (jamais bloquant). Territoire = valeur fixe « Madagascar et le monde entier », automatique, non modifiable. Groupe obligatoire (le pseudonyme peut le remplacer). Ancien chef-lieu de province : liste de référence en base, juste après l'adresse. Libellés « Parolier » et « Parole ou partition » des bulletins littéraire et dramatique conservés tels quels. Figuratif : formulaire d'adhésion commun et bulletin minimal provisoires, marqués « à confirmer », structure prête à recevoir les vrais documents. Cadre réservé OMDA (numéro OMDA, date d'adhésion, numéro de l'œuvre) attribué côté serveur, jamais saisi.
+4. Pseudonyme obligatoire à toute adhésion, conservable entre catégories, AUCUNE unicité.
+5. Numéro OMDA attribué par catégorie à la validation, côté serveur uniquement. Un SEUL compte utilisateur par auteur.
+6. Attestation de diffusion : obligatoire pour chaque œuvre en nouvelle catégorie (non-membre, ou membre d'une autre catégorie), facultative pour l'ajout d'une œuvre dans une catégorie où l'auteur est déjà membre. Bulletin de déclaration toujours obligatoire.
+7. Parcours candidat : TOUS les documents sont obligatoires. Ordre d'import imposé : (1) par œuvre, un bloc regroupé (fichier de l'œuvre, attestation, bulletin), (2) photo de l'auteur, (3) CIN légalisée, (4) acte de naissance, (5) certificat de résidence ; puis, en TOUTE DERNIÈRE étape, le selfie avec CIN, sans lequel « Envoyer ma demande » reste inaccessible (contrôle aussi côté serveur).
+8. Fichiers : renommage automatique, compression et conversion des images en JPG/PNG avant envoi ; musique : MP3 + PDF de paroles obligatoires ; film (œuvre cinématographique) : PDF de résumé obligatoire.
+9. Notifications écrites uniquement côté serveur ; l'app n'en fabrique jamais ; le candidat n'a pas de boîte de notifications ; le push est HORS périmètre.
+10. Soumission d'une œuvre par un membre : confirmation par ressaisie du mot de passe actuel vérifiée côté serveur (le SMS est abandonné) ; sans autorisation valide, l'œuvre reste « Brouillon ».
+
+RÈGLES DE TRAVAIL :
+- Une seule étape à la fois, rien d'anticipé.
+- Ne simule pas ce qui doit être réel ; une simulation nécessaire est signalée, désactivée en production et jamais présentée comme opérationnelle.
+- Si une information manque ou n'est pas décidée, signale-la au lieu de l'inventer.
+- Fin d'étape : npx tsc --noEmit, vérification effective, correction des erreurs, mise à jour de docs/PROGRESS.md et des docs concernées.
+- Garde les règles d'AI_RULES.md non contredites par les règles ci-dessus.
+- Jamais de clé service_role dans l'app ni de secret dans le code client.
+- Délai : tout hors paiements et hors push doit être opérationnel d'ici vendredi ; signale tôt ce qui ne tiendra pas.
+- Arrête-toi à la fin de chaque étape pour mon retour.
