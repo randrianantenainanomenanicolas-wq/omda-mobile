@@ -7,30 +7,15 @@ import type {
 import type {
   ModePaiement,
   OperateurPaiement,
-  StatutCotisation,
   StatutPaiement,
   TypePaiement,
 } from './enums';
 
 /**
- * Cotisation annuelle — table `cotisation` (`UNIQUE (membre_id, annee)`).
- * Un bouton « Payer » n'est affiché que si `statut = 'NON_PAYEE'`.
- */
-export type Cotisation = {
-  id: UUID;
-  membre_id: UUID;
-  annee: number;
-  montant: MontantAriary;
-  statut: StatutCotisation;
-  date_paiement: HorodatageISO | null;
-  created_at: HorodatageISO;
-};
-
-/**
  * Paiement — table `paiement`.
  *
  * Chaque paiement est rattaché à UN contexte selon son type
- * (`paiement_contexte_chk`) : adhésion, dépôt d'œuvre ou cotisation.
+ * (`paiement_contexte_chk`) : adhésion ou dépôt d'œuvre.
  *
  * ⚠️ Règle critique : l'application ne déclare un paiement réussi QUE si le
  * serveur confirme `statut = 'REUSSI'`. Les autres états restent « en attente »
@@ -50,7 +35,6 @@ export type Paiement = {
   motif_echec: string | null;
   demande_adhesion_id: UUID | null;
   oeuvre_id: UUID | null;
-  cotisation_id: UUID | null;
   candidat_id: UUID | null;
   membre_id: UUID | null;
   date_initiation: HorodatageISO;

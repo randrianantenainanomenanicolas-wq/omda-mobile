@@ -1,7 +1,6 @@
 import type {
   AttestationDiffusion,
   Categorie,
-  Cotisation,
   Membre,
   MembreCategorie,
   ModePaiement,
@@ -84,7 +83,7 @@ export interface MemberRepository {
 
   /* --------------------------------------------------- Accueil membre (P) */
 
-  /** Données de la page d'accueil : salutation, compteurs, cotisation de l'année. */
+  /** Données de la page d'accueil : salutation, compteurs, notifications non lues. */
   obtenirTableauDeBord(entree?: TableauDeBordEntree): Promise<Result<TableauDeBordMembre>>;
 
   /* --------------------------------------------------------- Œuvres (Q, R, S) */
@@ -143,18 +142,10 @@ export interface MemberRepository {
     options?: OptionsTeleversement,
   ): Promise<Result<FichierTeleverse>>;
 
-  /* ------------------------------------------------------- Cotisations (T) */
-
-  /** Cotisations du membre (liste vide si aucune). */
-  listerCotisations(entree?: ListerCotisationsEntree): Promise<Result<Cotisation[]>>;
-
-  /** Cotisation d'une année donnée. */
-  obtenirCotisation(annee: number): Promise<Result<Cotisation>>;
-
-  /* --------------------------------------------------------- Paiements (S, T) */
+  /* --------------------------------------------------------- Paiements (S) */
 
   /**
-   * Initie un paiement (dépôt d'œuvre `VALIDEE` ou cotisation due).
+   * Initie un paiement (frais de dépôt d'une œuvre `VALIDEE`).
    * ⚠️ Aucun succès n'est déduit localement : seul `statut = 'REUSSI'`
    * renvoyé par le serveur confirme le paiement.
    */
@@ -227,7 +218,7 @@ export type MiseAJourProfilEntree = {
 };
 
 export type TableauDeBordEntree = {
-  /** Année de la cotisation à afficher (par défaut l'année courante). */
+  /** Placeholder pour filtres futurs ; aucun champ requis aujourd'hui. */
   annee?: number;
 };
 
@@ -237,7 +228,6 @@ export type TableauDeBordMembre = {
   numero_adherent: string;
   statut_compte: StatutUtilisateur;
   nombre_oeuvres: number;
-  cotisation_annee: Cotisation | null;
   notifications_non_lues: number;
 };
 
@@ -294,14 +284,9 @@ export type UrlFichierConsulte = {
   chemin_stockage: string;
 };
 
-export type ListerCotisationsEntree = {
-  annee?: number;
-};
-
 /**
- * Paiement initié par un membre : dépôt d'œuvre ou cotisation.
- * Le contexte (`oeuvre_id` / `cotisation_id`) est imposé par le schéma
- * (`paiement_contexte_chk`).
+ * Paiement initié par un membre : frais de dépôt d'une œuvre `VALIDEE`.
+ * Le contexte (`oeuvre_id`) est imposé par le schéma (`paiement_contexte_chk`).
  */
 export type InitierPaiementMembreEntree = {
   type: TypePaiement;
@@ -311,8 +296,6 @@ export type InitierPaiementMembreEntree = {
   numero_telephone?: string | null;
   /** Obligatoire si `type = 'DEPOT_OEUVRE'` (œuvre au statut `VALIDEE`). */
   oeuvre_id?: UUID | null;
-  /** Obligatoire si `type = 'COTISATION'`. */
-  cotisation_id?: UUID | null;
 };
 
 export type ListerNotificationsEntree = {
@@ -327,8 +310,6 @@ export const CODES_ERREUR_MEMBRE = {
   NON_AUTHENTIFIE: 'NON_AUTHENTIFIE',
   OEUVRE_INTROUVABLE: 'OEUVRE_INTROUVABLE',
   OEUVRE_NON_VALIDEE: 'OEUVRE_NON_VALIDEE',
-  COTISATION_INTROUVABLE: 'COTISATION_INTROUVABLE',
-  COTISATION_DEJA_PAYEE: 'COTISATION_DEJA_PAYEE',
   OPERATEUR_INDISPONIBLE: 'OPERATEUR_INDISPONIBLE',
   FICHIER_TROP_VOLUMINEUX: 'FICHIER_TROP_VOLUMINEUX',
   TYPE_FICHIER_NON_AUTORISE: 'TYPE_FICHIER_NON_AUTORISE',

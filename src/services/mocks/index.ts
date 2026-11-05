@@ -10,7 +10,7 @@
  *   Money MVola (machine à états + numéros de test) ;
  * - `MockAuthService` : connexion, session, mot de passe oublié non révélateur,
  *   changement obligatoire du mot de passe ;
- * - `MockMemberRepository` : profil, tableau de bord, œuvres, cotisations,
+ * - `MockMemberRepository` : profil, tableau de bord, œuvres,
  *   paiements, notifications.
  *
  * Mode debug (délais, pannes) : `./configMock`.

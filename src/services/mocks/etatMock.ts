@@ -2,7 +2,6 @@ import type {
   AttestationDiffusion,
   BucketStockage,
   Candidat,
-  Cotisation,
   DemandeAdhesion,
   HorodatageISO,
   Membre,
@@ -52,7 +51,7 @@ import {
  * - liste dynamique des opérateurs Mobile Money (MVola) ;
  * - liens temporaires de consultation des documents stockés
  *   (`urlConsultationFichier`) ;
- * - état des comptes, dossiers, œuvres, cotisations et notifications.
+ * - état des comptes, dossiers, œuvres et notifications.
  *
  * ⚠️ Aucune confirmation locale : un paiement n'atteint `REUSSI` que par la
  * machine à états « serveur » ci-dessous (webhook de l'opérateur simulé).
@@ -641,7 +640,6 @@ export function paiementMembrePublic(interne: PaiementMembreInterne): Paiement {
     motif_echec: interne.motif_echec,
     demande_adhesion_id: interne.demande_adhesion_id,
     oeuvre_id: interne.oeuvre_id,
-    cotisation_id: interne.cotisation_id,
     candidat_id: interne.candidat_id,
     membre_id: interne.membre_id,
     date_initiation: interne.date_initiation,
@@ -755,7 +753,6 @@ export function urlConsultationFichier(cheminStockage: string): string | null {
 export const oeuvresMock: Oeuvre[] = [];
 /** Attestations de diffusion des œuvres de membres (table `attestation_diffusion`). */
 export const attestationsOeuvresMock: AttestationDiffusion[] = [];
-export const cotisationsMock: Cotisation[] = [];
 export const notificationsMock: Notification[] = [];
 
 /** Index du compte de test doté du jeu de données complet (le reste est vide). */
@@ -797,18 +794,15 @@ export function prochainIdentifiantAttestation(): UUID {
 }
 
 /**
- * Crée les œuvres et cotisations du compte « complet » :
+ * Crée les œuvres du compte « complet » :
  * - 1 œuvre `VALIDEE` (dépôt payant possible), 1 `EN_COURS_DE_VALIDATION`,
  *   1 `REJETEE` avec motif ;
- * - une attestation de diffusion par œuvre (règle métier 8) ;
- * - cotisation de l'année NON_PAYEE, cotisation précédente PAYEE.
+ * - une attestation de diffusion par œuvre (règle métier 8).
  */
-function initialiserOeuvresEtCotisationsMock(): void {
+function initialiserOeuvresMock(): void {
   if (indexCompteComplet < 0) {
     return;
   }
-  const tarifCotisation = tarifApplique('COTISATION', null);
-  const montantCotisation = tarifCotisation ? tarifCotisation.montant : 0;
 
   oeuvresMock.push(
     {
@@ -897,27 +891,6 @@ function initialiserOeuvresEtCotisationsMock(): void {
       created_at: '2026-07-02T06:00:00.000Z',
     },
   );
-
-  cotisationsMock.push(
-    {
-      id: IDS_TEST.cotisation_2026,
-      membre_id: membreIdComplet,
-      annee: 2026,
-      montant: montantCotisation,
-      statut: 'NON_PAYEE',
-      date_paiement: null,
-      created_at: DATE_COMPTE,
-    },
-    {
-      id: IDS_TEST.cotisation_2025,
-      membre_id: membreIdComplet,
-      annee: 2025,
-      montant: montantCotisation,
-      statut: 'PAYEE',
-      date_paiement: '2025-03-14T07:20:00.000Z',
-      created_at: '2025-01-02T06:00:00.000Z',
-    },
-  );
 }
 
 /** Crée les notifications du compte « complet » (2 non lues, 1 lue, 1 globale). */
@@ -978,7 +951,7 @@ function initialiserNotificationsMock(): void {
   );
 }
 
-initialiserOeuvresEtCotisationsMock();
+initialiserOeuvresMock();
 initialiserNotificationsMock();
 
 /** Œuvres d'un membre (les plus récentes d'abord ; vide si aucune). */
@@ -1024,13 +997,6 @@ export function remplacerAttestationOeuvre(
   return attestation;
 }
 
-/** Cotisations d'un membre (année décroissante ; vide si aucune). */
-export function cotisationsDuMembre(membreId: UUID): Cotisation[] {
-  return cotisationsMock
-    .filter((element) => element.membre_id === membreId)
-    .sort((a, b) => b.annee - a.annee);
-}
-
 /** Notifications d'un utilisateur + annonces globales (récentes d'abord). */
 export function notificationsDeUtilisateur(utilisateurId: UUID): Notification[] {
   return notificationsMock
@@ -1066,19 +1032,11 @@ export function ajouterNotification(entree: {
 }
 
 /**
- * Effets « serveur » d'un paiement confirmé : cotisation marquée payée, œuvre
- * passée en `DEPOT_FINALISE`, notification `PAIEMENT_REUSSI`.
+ * Effets « serveur » d'un paiement confirmé : œuvre passée en `DEPOT_FINALISE`,
+ * notification `PAIEMENT_REUSSI`.
  * À n'appeler QUE sur la transition vers `REUSSI`.
  */
 export function appliquerEffetsPaiementReussi(paiement: Paiement): void {
-  if (paiement.type === 'COTISATION' && paiement.cotisation_id) {
-    const cotisation = cotisationsMock.find((element) => element.id === paiement.cotisation_id);
-    if (cotisation && cotisation.statut !== 'PAYEE') {
-      cotisation.statut = 'PAYEE';
-      cotisation.date_paiement = paiement.date_confirmation ?? maintenantISO();
-    }
-  }
-
   if (paiement.type === 'DEPOT_OEUVRE' && paiement.oeuvre_id) {
     const oeuvre = oeuvresMock.find((element) => element.id === paiement.oeuvre_id);
     if (oeuvre && oeuvre.statut === 'VALIDEE') {

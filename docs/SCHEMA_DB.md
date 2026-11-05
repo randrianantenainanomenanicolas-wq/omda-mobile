@@ -60,8 +60,7 @@ create type statut_oeuvre as enum (
 
 create type type_paiement as enum (
   'ADHESION',
-  'DEPOT_OEUVRE',
-  'COTISATION'
+  'DEPOT_OEUVRE'
 );
 
 -- Paiement : Mobile Money uniquement
@@ -82,13 +81,7 @@ create type statut_paiement as enum (
 
 create type type_operation_tarif as enum (
   'ADHESION',
-  'DEPOT_OEUVRE',
-  'COTISATION'
-);
-
-create type statut_cotisation as enum (
-  'NON_PAYEE',
-  'PAYEE'
+  'DEPOT_OEUVRE'
 );
 
 create type statut_adhesion_categorie as enum (
@@ -380,21 +373,6 @@ create table attestation_diffusion (
 );
 
 -- ============================================================
--- Cotisations
--- ============================================================
-
-create table cotisation (
-  id               uuid primary key default gen_random_uuid(),
-  membre_id        uuid not null references membre(id) on delete cascade,
-  annee            integer not null,
-  montant          integer not null check (montant >= 0),
-  statut           statut_cotisation not null default 'NON_PAYEE',
-  date_paiement    timestamptz,
-  created_at       timestamptz not null default now(),
-  unique (membre_id, annee)
-);
-
--- ============================================================
 -- Paiements (MOBILE_MONEY + MVOLA uniquement)
 -- ============================================================
 
@@ -412,7 +390,6 @@ create table paiement (
   motif_echec            text,
   demande_adhesion_id    uuid references demande_adhesion(id),
   oeuvre_id              uuid references oeuvre(id),
-  cotisation_id          uuid references cotisation(id),
   candidat_id            uuid references candidat(id),
   membre_id              uuid references membre(id),
   date_initiation        timestamptz not null default now(),
@@ -421,8 +398,7 @@ create table paiement (
   updated_at             timestamptz not null default now(),
   constraint paiement_contexte_chk check (
     (type = 'ADHESION'     and demande_adhesion_id is not null) or
-    (type = 'DEPOT_OEUVRE' and oeuvre_id is not null) or
-    (type = 'COTISATION'   and cotisation_id is not null)
+    (type = 'DEPOT_OEUVRE' and oeuvre_id is not null)
   ),
   -- 3 opérateurs acceptés (MVola, Orange Money, Airtel Money), liste dynamique depuis operateur_mobile_money
   constraint paiement_mm_operateur_chk check (operateur in ('MVOLA', 'ORANGE_MONEY', 'AIRTEL_MONEY')),
@@ -440,10 +416,6 @@ create unique index paiement_adhesion_reussi_unique
 create unique index paiement_depot_reussi_unique
   on paiement (oeuvre_id)
   where type = 'DEPOT_OEUVRE' and statut = 'REUSSI';
-
-create unique index paiement_cotisation_reussi_unique
-  on paiement (cotisation_id)
-  where type = 'COTISATION' and statut = 'REUSSI';
 
 create table journal_paiement (
   id            uuid primary key default gen_random_uuid(),
@@ -564,7 +536,6 @@ alter table public.piece enable row level security;
 alter table public.oeuvre enable row level security;
 alter table public.attestation_diffusion enable row level security;
 
-alter table public.cotisation enable row level security;
 alter table public.paiement enable row level security;
 alter table public.journal_paiement enable row level security;
 
@@ -785,21 +756,6 @@ create policy "attestation_select_owner_or_staff" on public.attestation_diffusio
     )
     or public.is_agent_or_admin()
   );
-
--- ============================================================
--- Policies RLS — Cotisations
--- ============================================================
-
-drop policy if exists "cotisation_select_owner_or_staff" on public.cotisation;
-create policy "cotisation_select_owner_or_staff" on public.cotisation
-  for select to authenticated using (
-    membre_id in (select id from public.membre where utilisateur_id = auth.uid())
-    or public.is_agent_or_admin()
-  );
-
-drop policy if exists "cotisation_staff_manage" on public.cotisation;
-create policy "cotisation_staff_manage" on public.cotisation
-  for all to authenticated using (public.is_agent_or_admin()) with check (public.is_agent_or_admin());
 
 -- ============================================================
 -- Policies RLS — Paiements

@@ -493,11 +493,10 @@ async function scenarioMembreConnexion(): Promise<void> {
 
   const tableau = await mockMemberRepository.obtenirTableauDeBord();
   verifier(
-    'tableau de bord : 3 œuvres + 2 notifications non lues + cotisation 2026 NON_PAYEE',
+    'tableau de bord : 3 œuvres + 2 notifications non lues',
     tableau.ok &&
       tableau.valeur.nombre_oeuvres === 3 &&
       tableau.valeur.notifications_non_lues === 2 &&
-      tableau.valeur.cotisation_annee?.statut === 'NON_PAYEE' &&
       tableau.valeur.prenom === 'Jean',
   );
 
@@ -561,7 +560,7 @@ async function scenarioMembreConnexion(): Promise<void> {
  * Écrans Q, R, S (partie 2 de l'espace membre) — cycle de vie d'une œuvre :
  * brouillon, modification, téléversement (progression, annulation, contrôles
  * 20 Mo / type MIME), envoi `ENVOYEE` SANS paiement (règle métier 4), refus des
- * paiements d'œuvre non validée, cotisation de l'année et erreurs de paiement.
+ * paiements d'œuvre non validée et erreurs de paiement.
  * S'exécute avec la session du compte « complet » (`membre@omda.mg`) encore
  * ouverte et n'ajoute AUCUNE notification (aucun paiement confirmé).
  */
@@ -826,32 +825,14 @@ async function scenarioMembreOeuvres(): Promise<void> {
       oeuvreIntrouvable.erreur.code === 'OEUVRE_INTROUVABLE',
   );
 
-  const cotisation2026 = await mockMemberRepository.obtenirCotisation(2026);
-  verifier(
-    'cotisation 2026 : NON_PAYEE, montant du service, aucune date de paiement',
-    cotisation2026.ok &&
-      cotisation2026.valeur.statut === 'NON_PAYEE' &&
-      cotisation2026.valeur.montant > 0 &&
-      cotisation2026.valeur.date_paiement === null,
-  );
-  const cotisationId = cotisation2026.ok ? cotisation2026.valeur.id : '';
-
-  const cotisationAbsente = await mockMemberRepository.obtenirCotisation(2024);
-  verifier(
-    'année sans cotisation -> COTISATION_INTROUVABLE',
-    !cotisationAbsente.ok &&
-      cotisationAbsente.erreur.type === 'metier' &&
-      cotisationAbsente.erreur.code === 'COTISATION_INTROUVABLE',
-  );
-
   // Opérateur désactivé côté « serveur » : MVola doit être refusé pendant ce laps.
   definirOperateurActif('MVOLA', false);
   const operateurInactif = await mockMemberRepository.initierPaiement({
-    type: 'COTISATION',
-    cotisation_id: cotisationId,
+    type: 'DEPOT_OEUVRE',
     mode: 'MOBILE_MONEY',
     operateur: 'MVOLA',
     numero_telephone: '+261340000001',
+    oeuvre_id: 'a0000000-0000-4000-8000-000000000001',
   });
   verifier(
     'opérateur désactivé refusé (OPERATEUR_INDISPONIBLE)',
@@ -862,11 +843,11 @@ async function scenarioMembreOeuvres(): Promise<void> {
   definirOperateurActif('MVOLA', true);
 
   const numeroInvalide = await mockMemberRepository.initierPaiement({
-    type: 'COTISATION',
-    cotisation_id: cotisationId,
+    type: 'DEPOT_OEUVRE',
     mode: 'MOBILE_MONEY',
     operateur: 'MVOLA',
     numero_telephone: '0340000001',
+    oeuvre_id: 'a0000000-0000-4000-8000-000000000001',
   });
   verifier(
     'numéro hors format international refusé (NUMERO_TELEPHONE_INVALIDE)',
@@ -1153,74 +1134,17 @@ async function scenarioDemandeCategorieOeuvres(): Promise<void> {
   }
 }
 
-async function scenarioMembreCotisation(): Promise<void> {
-  const cotisations = await mockMemberRepository.listerCotisations({ annee: 2026 });
-  verifier(
-    'cotisation 2026 : 1 ligne NON_PAYEE avec montant',
-    cotisations.ok &&
-      cotisations.valeur.length === 1 &&
-      cotisations.valeur[0].statut === 'NON_PAYEE' &&
-      cotisations.valeur[0].montant > 0,
-  );
-  const montantCotisation = cotisations.ok ? cotisations.valeur[0].montant : -1;
-  const cotisationId = cotisations.ok ? cotisations.valeur[0].id : '';
-
-  const initie = await mockMemberRepository.initierPaiement({
-    type: 'COTISATION',
-    cotisation_id: cotisationId,
-    mode: 'MOBILE_MONEY',
-    operateur: 'MVOLA',
-    numero_telephone: '+261340000001',
-  });
-  verifier(
-    'initiation cotisation = INITIE (jamais REUSSI immédiat)',
-    initie.ok &&
-      initie.valeur.statut === 'INITIE' &&
-      initie.valeur.montant === montantCotisation &&
-      initie.valeur.date_confirmation === null,
-  );
-  const paiementId = initie.ok ? initie.valeur.id : '';
-
-  const polling1 = await mockMemberRepository.obtenirPaiement(paiementId);
-  verifier(
-    'polling 1 -> EN_ATTENTE_CONFIRMATION',
-    polling1.ok && polling1.valeur.statut === 'EN_ATTENTE_CONFIRMATION',
-  );
-  const polling2 = await mockMemberRepository.obtenirPaiement(paiementId);
-  verifier('polling 2 -> REUSSI confirmé par le serveur', polling2.ok && polling2.valeur.statut === 'REUSSI');
-
-  const cotisationsApres = await mockMemberRepository.listerCotisations({ annee: 2026 });
-  verifier(
-    'effet serveur : cotisation PAYEE avec date de paiement',
-    cotisationsApres.ok &&
-      cotisationsApres.valeur[0].statut === 'PAYEE' &&
-      cotisationsApres.valeur[0].date_paiement !== null,
-  );
-
-  const relance = await mockMemberRepository.initierPaiement({
-    type: 'COTISATION',
-    cotisation_id: cotisationId,
-    mode: 'MOBILE_MONEY',
-    operateur: 'MVOLA',
-    numero_telephone: '+261340000001',
-  });
-  verifier(
-    'seconde cotisation -> COTISATION_DEJA_PAYEE',
-    !relance.ok &&
-      relance.erreur.type === 'metier' &&
-      relance.erreur.code === 'COTISATION_DEJA_PAYEE',
-  );
-
+async function scenarioMembreNotifications(): Promise<void> {
   const notifications = await mockMemberRepository.listerNotifications({ non_lues_uniquement: true });
   verifier(
-    '4 non lues (2 initiales + 2 paiements confirmés), toutes de type PAIEMENT_REUSSI pour les 2 dernières',
+    '3 non lues (2 initiales + 1 paiement confirmé de type PAIEMENT_REUSSI)',
     notifications.ok &&
-      notifications.valeur.length === 4 &&
-      notifications.valeur.filter((element) => element.type === 'PAIEMENT_REUSSI').length === 2,
+      notifications.valeur.length === 3 &&
+      notifications.valeur.filter((element) => element.type === 'PAIEMENT_REUSSI').length === 1,
   );
 
   const marquage = await mockMemberRepository.marquerToutesNotificationsLues();
-  verifier('marquage global : 4 notifications passées à lues', marquage.ok && marquage.valeur === 4);
+  verifier('marquage global : 3 notifications passées à lues', marquage.ok && marquage.valeur === 3);
 
   const restantes = await mockMemberRepository.listerNotifications({ non_lues_uniquement: true });
   verifier('plus aucune notification non lue', restantes.ok && restantes.valeur.length === 0);
@@ -1285,23 +1209,19 @@ async function scenarioMembreComptes(): Promise<void> {
   const vide = await mockAuthService.connecter({ email: 'vide@omda.mg', mot_de_passe: 'Omda2026!' });
   verifier('connexion du compte vide', vide.ok);
   const oeuvresVides = await mockMemberRepository.listerOeuvres();
-  const cotisationsVides = await mockMemberRepository.listerCotisations();
   const notificationsVides = await mockMemberRepository.listerNotifications({
     non_lues_uniquement: true,
   });
   const tableauVide = await mockMemberRepository.obtenirTableauDeBord();
   verifier(
-    'états vides : 0 œuvre, 0 cotisation, 0 notification non lue, cotisation_annee null',
+    'états vides : 0 œuvre, 0 notification non lue',
     oeuvresVides.ok &&
       oeuvresVides.valeur.length === 0 &&
-      cotisationsVides.ok &&
-      cotisationsVides.valeur.length === 0 &&
       notificationsVides.ok &&
       notificationsVides.valeur.length === 0 &&
       tableauVide.ok &&
       tableauVide.valeur.nombre_oeuvres === 0 &&
-      tableauVide.valeur.notifications_non_lues === 0 &&
-      tableauVide.valeur.cotisation_annee === null,
+      tableauVide.valeur.notifications_non_lues === 0,
   );
   await mockAuthService.deconnecter();
 
@@ -1345,13 +1265,13 @@ async function scenarioMembreComptes(): Promise<void> {
   await mockAuthService.deconnecter();
 }
 
-/** Espace membre : connexion + données, cotisation + notifications, comptes de test. */
+/** Espace membre : connexion + données, notifications, comptes de test. */
 async function scenarioMembre(): Promise<void> {
   await scenarioMembreConnexion();
   await scenarioMembreOeuvres();
   await scenarioMembreCategories();
   await scenarioDemandeCategorieOeuvres();
-  await scenarioMembreCotisation();
+  await scenarioMembreNotifications();
   await scenarioMembreComptes();
 }
 

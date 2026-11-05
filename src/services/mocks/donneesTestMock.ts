@@ -35,8 +35,6 @@ export const IDS_TEST = {
   oeuvre_validee: 'a0000000-0000-4000-8000-000000000001',
   oeuvre_en_validation: 'a0000000-0000-4000-8000-000000000002',
   oeuvre_rejetee: 'a0000000-0000-4000-8000-000000000003',
-  cotisation_2026: 'b0000000-0000-4000-8000-000000000001',
-  cotisation_2025: 'b0000000-0000-4000-8000-000000000002',
 } as const;
 
 /* ----------------------------------------------------------- Référentiels */
@@ -108,18 +106,6 @@ export const TARIFS_TEST: Tarif[] = [
     type_operation: 'DEPOT_OEUVRE',
     categorie_id: null,
     montant: 50000,
-    devise: 'MGA',
-    actif: true,
-    date_debut: '2026-01-01',
-    date_fin: null,
-    created_at: '2026-01-01T05:00:00.000Z',
-    updated_at: '2026-01-01T05:00:00.000Z',
-  },
-  {
-    id: 'c0000000-0000-4000-8000-000000000003',
-    type_operation: 'COTISATION',
-    categorie_id: null,
-    montant: 100000,
     devise: 'MGA',
     actif: true,
     date_debut: '2026-01-01',
@@ -230,7 +216,7 @@ export type CompteTest = {
 
 /**
  * Comptes de test de l'espace membre.
- * - `membre@omda.mg` : compte complet (œuvres, cotisation, notifications) ;
+ * - `membre@omda.mg` : compte complet (œuvres, notifications) ;
  * - `premiere.connexion@omda.mg` : changement de mot de passe OBLIGATOIRE ;
  * - `vide@omda.mg` : compte actif SANS œuvre (états vides) ;
  * - `desactive@omda.mg` : compte désactivé (connexion refusée) ;

@@ -37,7 +37,7 @@ export default function AProposScreen() {
       <SectionPresentation
         titre="Nos missions"
         paragraphes={[
-          'Accompagner les auteurs dans leurs démarches d’adhésion, de dépôt d’œuvre et de cotisation annuelle.',
+          'Accompagner les auteurs dans leurs démarches d’adhésion et de dépôt d’œuvre.',
           'Informer sur les pièces à fournir, les délais indicatifs de traitement et l’avancement de chaque dossier.',
         ]}
       />
@@ -45,7 +45,7 @@ export default function AProposScreen() {
       <SectionPresentation
         titre="Votre espace personnel"
         paragraphes={[
-          'Une fois votre adhésion finalisée, vous accédez à votre espace membre : vos œuvres et leurs statuts, votre cotisation, votre profil et vos notifications.',
+          'Une fois votre adhésion finalisée, vous accédez à votre espace membre : vos œuvres et leurs statuts, votre profil et vos notifications.',
           'Le suivi de votre demande d’adhésion reste possible à tout moment grâce à votre numéro de dossier et votre code de suivi.',
         ]}
       />

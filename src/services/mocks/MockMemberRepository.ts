@@ -1,7 +1,6 @@
 import type {
   AttestationDiffusion,
   Categorie,
-  Cotisation,
   Membre,
   MembreCategorie,
   Notification,
@@ -24,7 +23,6 @@ import type {
   DemandeCategorieOeuvresEntree,
   FichierTeleverse,
   InitierPaiementMembreEntree,
-  ListerCotisationsEntree,
   ListerNotificationsEntree,
   ListerOeuvresEntree,
   MemberRepository,
@@ -57,8 +55,6 @@ import {
   categoriesDuMembre,
   changerStatutAppartenanceCategorie,
   CODES_MOCK,
-  cotisationsDuMembre,
-  cotisationsMock,
   definirOeuvresDemandeCategorie,
   estOperateurActif,
   genererUUID,
@@ -287,10 +283,9 @@ function ouvrirDemandeCategorie(
  * ⚠️ Règles métier simulées :
  * - aucune session ⇒ `NON_AUTHENTIFIE` (comme un refus RLS) ;
  * - paiement d'un dépôt possible UNIQUEMENT si l'œuvre est `VALIDEE` ;
- * - cotisation payable seulement si `NON_PAYEE` ;
  * - le paiement ne passe à `REUSSI` que par la « confirmation serveur »
  *   (machine à états partagée), puis les effets sont appliqués côté serveur
- *   (cotisation `PAYEE`, œuvre `DEPOT_FINALISE`, notification créée).
+ *   (œuvre `DEPOT_FINALISE`, notification créée).
  */
 export class MockMemberRepository implements MemberRepository {
   /* ------------------------------------------------------------ Profil (U) */
@@ -462,7 +457,7 @@ export class MockMemberRepository implements MemberRepository {
 
   /* --------------------------------------------------- Accueil membre (P) */
 
-  /** Compteurs de l'accueil : œuvres, cotisation de l'année, notifications non lues. */
+  /** Compteurs de l'accueil : œuvres et notifications non lues. */
   async obtenirTableauDeBord(entree?: TableauDeBordEntree): Promise<Result<TableauDeBordMembre>> {
     const panne = await preparerAppelMock();
     if (panne) {
@@ -473,12 +468,7 @@ export class MockMemberRepository implements MemberRepository {
       return sessionRequise();
     }
 
-    const annee = entree?.annee ?? new Date().getFullYear();
     const oeuvres = oeuvresDuMembre(contexte.membre.id);
-    const cotisation =
-      cotisationsMock.find(
-        (element) => element.membre_id === contexte.membre.id && element.annee === annee,
-      ) ?? null;
     const notifications = notificationsDeUtilisateur(contexte.utilisateur.id);
     const candidat = candidatParUtilisateur(contexte.utilisateur.id);
 
@@ -487,7 +477,6 @@ export class MockMemberRepository implements MemberRepository {
       numero_adherent: contexte.membre.numero_adherent,
       statut_compte: contexte.membre.statut,
       nombre_oeuvres: oeuvres.length,
-      cotisation_annee: cotisation,
       notifications_non_lues: notifications.filter((element) => !element.lue).length,
     });
   }
@@ -734,53 +723,10 @@ export class MockMemberRepository implements MemberRepository {
     return simulerTeleversement(entree, options);
   }
 
-  /* ------------------------------------------------------- Cotisations (T) */
-
-  /** Cotisations du membre (année décroissante) ; vide si aucune. */
-  async listerCotisations(entree?: ListerCotisationsEntree): Promise<Result<Cotisation[]>> {
-    const panne = await preparerAppelMock();
-    if (panne) {
-      return panne;
-    }
-    const contexte = contexteMembre();
-    if (!contexte) {
-      return sessionRequise();
-    }
-
-    const cotisations = cotisationsDuMembre(contexte.membre.id);
-    if (entree?.annee === undefined) {
-      return ok(cotisations);
-    }
-    return ok(cotisations.filter((cotisation) => cotisation.annee === entree.annee));
-  }
-
-  /** Cotisation d'une année donnée. */
-  async obtenirCotisation(annee: number): Promise<Result<Cotisation>> {
-    const panne = await preparerAppelMock();
-    if (panne) {
-      return panne;
-    }
-    const contexte = contexteMembre();
-    if (!contexte) {
-      return sessionRequise();
-    }
-
-    const cotisation = cotisationsMock.find(
-      (element) => element.membre_id === contexte.membre.id && element.annee === annee,
-    );
-    if (!cotisation) {
-      return erreurMetier(
-        CODES_ERREUR_MEMBRE.COTISATION_INTROUVABLE,
-        `Aucune cotisation n’est enregistrée pour l’année ${annee}.`,
-      );
-    }
-    return ok(cotisation);
-  }
-
-  /* ------------------------------------------------------- Paiements (S, T) */
+  /* ------------------------------------------------------- Paiements (S) */
 
   /**
-   * Initie un paiement de membre (dépôt d'œuvre `VALIDEE` ou cotisation due).
+   * Initie un paiement de membre (dépôt d'œuvre `VALIDEE`).
    * ⚠️ Le statut renvoyé n'est jamais `REUSSI` : la confirmation vient du
    * serveur (polling via `obtenirPaiement`).
    */
@@ -816,7 +762,6 @@ export class MockMemberRepository implements MemberRepository {
 
     let montant = 0;
     let oeuvreId: UUID | null = null;
-    let cotisationId: UUID | null = null;
 
     if (entree.type === 'DEPOT_OEUVRE') {
       const oeuvre = oeuvresMock.find(
@@ -834,7 +779,7 @@ export class MockMemberRepository implements MemberRepository {
           'Le paiement du dépôt n’est possible que pour une œuvre validée.',
         );
       }
-      if (paiementReussiExistant({ oeuvre_id: oeuvre.id, cotisation_id: null })) {
+      if (paiementReussiExistant({ oeuvre_id: oeuvre.id })) {
         return erreurMetier(
           CODES_ERREUR_CANDIDAT.PAIEMENT_DEJA_REUSSI,
           'Le dépôt de cette œuvre a déjà été payé.',
@@ -849,31 +794,6 @@ export class MockMemberRepository implements MemberRepository {
       }
       montant = tarif.montant;
       oeuvreId = oeuvre.id;
-    } else if (entree.type === 'COTISATION') {
-      const cotisation = cotisationsMock.find(
-        (element) =>
-          element.id === entree.cotisation_id && element.membre_id === contexte.membre.id,
-      );
-      if (!cotisation) {
-        return erreurMetier(
-          CODES_ERREUR_MEMBRE.COTISATION_INTROUVABLE,
-          'Cette cotisation est introuvable.',
-        );
-      }
-      if (cotisation.statut === 'PAYEE') {
-        return erreurMetier(
-          CODES_ERREUR_MEMBRE.COTISATION_DEJA_PAYEE,
-          'Cette cotisation est déjà payée.',
-        );
-      }
-      if (paiementReussiExistant({ oeuvre_id: null, cotisation_id: cotisation.id })) {
-        return erreurMetier(
-          CODES_ERREUR_CANDIDAT.PAIEMENT_DEJA_REUSSI,
-          'Cette cotisation a déjà été payée.',
-        );
-      }
-      montant = cotisation.montant;
-      cotisationId = cotisation.id;
     } else {
       return refusMock(
         CODES_MOCK.MODE_PAIEMENT_INVALIDE,
@@ -897,7 +817,6 @@ export class MockMemberRepository implements MemberRepository {
       motif_echec: null,
       demande_adhesion_id: null,
       oeuvre_id: oeuvreId,
-      cotisation_id: cotisationId,
       candidat_id: null,
       membre_id: contexte.membre.id,
       date_initiation: maintenant,
@@ -913,8 +832,8 @@ export class MockMemberRepository implements MemberRepository {
 
   /**
    * Polling du paiement : la machine à états « serveur » décide du statut.
-   * Les effets (cotisation payée, œuvre `DEPOT_FINALISE`, notification) sont
-   * appliqués à la transition vers `REUSSI`.
+   * Les effets (œuvre `DEPOT_FINALISE`, notification) sont appliqués à la
+   * transition vers `REUSSI`.
    */
   async obtenirPaiement(paiement_id: UUID): Promise<Result<Paiement>> {
     const panne = await preparerAppelMock();
@@ -1011,17 +930,16 @@ export class MockMemberRepository implements MemberRepository {
 }
 
 /**
- * Vrai si un paiement déjà `REUSSI` couvre ce contexte (dépôt d'œuvre ou
- * cotisation) : le schéma interdit deux paiements réussis pour le même objet.
+ * Vrai si un paiement déjà `REUSSI` couvre ce contexte (dépôt d'œuvre) : le
+ * schéma interdit deux paiements réussis pour le même objet.
  */
 function paiementReussiExistant(contexte: {
   oeuvre_id: UUID | null;
-  cotisation_id: UUID | null;
 }): boolean {
   return [...paiementsMembreMock.values()].some(
     (paiement) =>
       paiement.statut === 'REUSSI' &&
-      ((contexte.oeuvre_id !== null && paiement.oeuvre_id === contexte.oeuvre_id) ||
-        (contexte.cotisation_id !== null && paiement.cotisation_id === contexte.cotisation_id)),
+      contexte.oeuvre_id !== null &&
+      paiement.oeuvre_id === contexte.oeuvre_id,
   );
 }

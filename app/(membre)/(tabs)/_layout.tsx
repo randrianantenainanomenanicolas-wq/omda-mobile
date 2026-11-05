@@ -40,15 +40,6 @@ export default function MembreTabsLayout() {
         }}
       />
       <Tabs.Screen
-        name="cotisation"
-        options={{
-          title: 'Cotisation',
-          tabBarIcon: ({ color, size }) => (
-            <FontAwesome6 name="money-bill-wave" size={size} color={color} />
-          ),
-        }}
-      />
-      <Tabs.Screen
         name="profil"
         options={{
           title: 'Profil',

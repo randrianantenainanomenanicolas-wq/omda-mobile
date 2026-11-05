@@ -21,12 +21,11 @@ import type { ErreurApp } from '../../src/services/contracts';
 import { mockMemberRepository, mockPublicContentService } from '../../src/services/mocks';
 
 /**
- * Écran de paiement du MEMBRE (hors onglets) — cotisation annuelle et frais de
- * dépôt d'une œuvre `VALIDEE`.
+ * Écran de paiement du MEMBRE (hors onglets) — frais de dépôt d'une œuvre `VALIDEE`.
  *
  * Règles impératives reprises de l'écran N (paiement candidat) :
- * - le montant vient EXCLUSIVEMENT d'un service : `obtenirCotisation(annee)` pour
- *   la cotisation, `estimerMontant` pour les frais de dépôt — jamais de l'écran ;
+ * - le montant vient EXCLUSIVEMENT d'un service : `estimerMontant` pour les frais
+ *   de dépôt — jamais de l'écran ;
  * - aucun succès n'est annoncé avant la confirmation du serveur
  *   (`paiement.statut = 'REUSSI'` obtenu par polling via `obtenirPaiement`) ;
  * - le bouton « Payer » reste neutre (`secondary`) : aucun vert `status-success`
@@ -141,7 +140,6 @@ type ContextePaiement = {
   montant: number;
   mention: string;
   oeuvre_id: string | null;
-  cotisation_id: string | null;
   /** Vrai si le serveur annonce déjà le règlement (aucun paiement possible). */
   deja_regle: boolean;
 };
@@ -150,14 +148,10 @@ export default function PaiementMembreScreen() {
   const parametres = useLocalSearchParams<{
     type?: string;
     oeuvre_id?: string;
-    cotisation_id?: string;
-    annee?: string;
   }>();
 
   const typeParam = parametreTexte(parametres.type);
   const oeuvreIdParam = parametreTexte(parametres.oeuvre_id);
-  const cotisationIdParam = parametreTexte(parametres.cotisation_id);
-  const anneeParam = parametreTexte(parametres.annee);
 
   const [etat, setEtat] = useState<EtatEcran>('chargement');
   const [messageErreur, setMessageErreur] = useState('');
@@ -186,57 +180,6 @@ export default function PaiementMembreScreen() {
       monteRef.current = false;
     };
   }, []);
-
-  /** Contexte d'une cotisation : montant officiel + statut annoncés par le serveur. */
-  const chargerContexteCotisation = useCallback(async () => {
-    const annee = Number.parseInt(anneeParam, 10);
-
-    if (!cotisationIdParam || Number.isNaN(annee)) {
-      setMessageVide(
-        'Les informations de votre cotisation sont incomplètes. Revenez à l’onglet Cotisation pour relancer le paiement.',
-      );
-      setEtat('vide');
-      return;
-    }
-
-    const reponse = await mockMemberRepository.obtenirCotisation(annee);
-
-    if (!monteRef.current) return;
-
-    if (!reponse.ok) {
-      if (
-        reponse.erreur.type === 'metier' &&
-        reponse.erreur.code === CODES_ERREUR_MEMBRE.COTISATION_INTROUVABLE
-      ) {
-        setMessageVide(reponse.erreur.message);
-        setEtat('vide');
-        return;
-      }
-      setMessageErreur(traduireErreur(reponse.erreur));
-      setEtat('erreur');
-      return;
-    }
-
-    const cotisation = reponse.valeur;
-    if (cotisation.id !== cotisationIdParam) {
-      setMessageVide(
-        'Cette cotisation ne correspond plus à votre situation. Revenez à l’onglet Cotisation pour la consulter.',
-      );
-      setEtat('vide');
-      return;
-    }
-
-    setContexte({
-      type: 'COTISATION',
-      objet: `Cotisation annuelle ${cotisation.annee}`,
-      montant: cotisation.montant,
-      mention: 'Montant officiel communiqué par le serveur OMDA.',
-      oeuvre_id: null,
-      cotisation_id: cotisation.id,
-      deja_regle: cotisation.statut === 'PAYEE',
-    });
-    setEtat('contenu');
-  }, [anneeParam, cotisationIdParam]);
 
   /** Contexte d'un dépôt d'œuvre : paiement possible UNIQUEMENT pour `VALIDEE`. */
   const chargerContexteOeuvre = useCallback(async () => {
@@ -295,7 +238,6 @@ export default function PaiementMembreScreen() {
       montant: estimation.valeur.montant,
       mention: estimation.valeur.mention,
       oeuvre_id: oeuvre.id,
-      cotisation_id: null,
       deja_regle: oeuvre.statut === 'DEPOT_FINALISE',
     });
     setEtat('contenu');
@@ -335,18 +277,13 @@ export default function PaiementMembreScreen() {
       setOperateurChoisi(premierOperateur.code);
       setOperateurLibelle(premierOperateur.libelle);
 
-      if (typeParam === 'COTISATION') {
-        await chargerContexteCotisation();
-        return;
-      }
-
       if (typeParam === 'DEPOT_OEUVRE') {
         await chargerContexteOeuvre();
         return;
       }
 
       setMessageVide(
-        'Ce paiement n’est pas disponible depuis cet écran. Revenez à votre cotisation ou à la fiche de votre œuvre.',
+        'Ce paiement n’est pas disponible depuis cet écran. Revenez à la fiche de votre œuvre pour relancer le paiement.',
       );
       setEtat('vide');
     } catch {
@@ -355,7 +292,7 @@ export default function PaiementMembreScreen() {
       );
       setEtat('erreur');
     }
-  }, [chargerContexteCotisation, chargerContexteOeuvre, typeParam]);
+  }, [chargerContexteOeuvre, typeParam]);
 
   /** Chargement initial : sans cet appel, l'écran resterait bloqué. */
   useEffect(() => {
@@ -444,7 +381,6 @@ export default function PaiementMembreScreen() {
       operateur: operateurChoisi,
       numero_telephone: numeroNettoye,
       oeuvre_id: contexte.oeuvre_id,
-      cotisation_id: contexte.cotisation_id,
     });
 
     if (!monteRef.current) return;
@@ -491,7 +427,7 @@ export default function PaiementMembreScreen() {
     setErreurVerification(null);
   }, []);
 
-  /** Retour à l'objet réglé : cotisation ou fiche de l'œuvre. */
+  /** Retour à l'objet réglé : fiche de l'œuvre. */
   const retourObjet = useCallback(() => {
     if (contexte?.type === 'DEPOT_OEUVRE' && contexte.oeuvre_id) {
       router.push({
@@ -500,11 +436,10 @@ export default function PaiementMembreScreen() {
       });
       return;
     }
-    router.replace('/(membre)/(tabs)/cotisation');
+    router.replace('/(membre)/(tabs)/accueil');
   }, [contexte]);
 
-  const libelleRetour =
-    contexte?.type === 'COTISATION' ? 'Voir ma cotisation' : 'Voir la fiche de mon œuvre';
+  const libelleRetour = 'Voir la fiche de mon œuvre';
 
   /* ------------------------------------------------------ États de l'écran */
 

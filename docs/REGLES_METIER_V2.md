@@ -280,3 +280,16 @@ Le système de notifications n'est pas encore opérationnel. Il couvre les notif
 - Vérification par SMS : abandonnée, remplacée par la ressaisie du mot de passe (section 9).
 - Vocabulaire « Parolier » et « Parole ou partition » (Littéraire, Dramatique) : intentionnel, conservé tel quel.
 - « Film » (Audiovisuel) : œuvre cinématographique (section 8.2).
+
+## 19. Exclusions (décision de l'étape 28C)
+
+Les éléments suivants sont **totalement exclus** de l'application mobile : aucune fonctionnalité, aucun formulaire, aucune interface et aucun texte ne s'y rapporte.
+
+- **Cotisation annuelle** : la table `cotisation`, l'écran `cotisation`, l'onglet « Cotisation », le bloc cotisation du tableau de bord, les méthodes `listerCotisations` / `obtenirCotisation`, le type `StatutCotisation`, la valeur `COTISATION` des enums de paiement et de tarif, et toute mention de « cotisation » dans les écrans, contrats, mocks et documentation sont supprimés.
+- **Virement bancaire** : aucun mode ni écran de virement bancaire n'existe ; le seul mode de paiement est Mobile Money (3 opérateurs servis par `operateur_mobile_money`), et les paiements réels restent hors périmètre.
+
+### Ce qui reste (non concerné par l'exclusion)
+
+- Le champ « compte bancaire » facultatif de la fiche d'adhésion (donnée sensible, RLS stricte, jamais journalisé) est conservé : il n'a aucun lien avec la cotisation.
+- Les frais d'adhésion et les frais de déclaration d'œuvre restent gérés par la table `tarif` et l'écran de paiement (dépôt d'œuvre).
+- Les paiements Mobile Money (étape paiements à venir) restent ; seule la partie « cotisation » des écrans de paiement disparaît.

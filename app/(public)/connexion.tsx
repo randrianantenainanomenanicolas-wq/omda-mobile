@@ -137,7 +137,7 @@ export default function ConnexionScreen() {
       <View className="rounded-2xl border border-omda-borderGray bg-omda-white p-5">
         <Text className="text-base font-bold text-omda-black">Identifiants membre</Text>
         <Text className="mt-1 text-sm text-omda-textGray">
-          Accédez à votre espace adhérent pour gérer vos œuvres, suivre vos cotisations et consulter
+          Accédez à votre espace adhérent pour gérer vos œuvres et consulter
           vos notifications.
         </Text>
 

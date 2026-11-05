@@ -112,10 +112,10 @@ export const STATUTS_OEUVRE_MODIFIABLES: readonly StatutOeuvre[] = [
 
 /* ------------------------------------------------------------------ Paiements */
 
-export const TYPES_PAIEMENT = ['ADHESION', 'DEPOT_OEUVRE', 'COTISATION'] as const;
+export const TYPES_PAIEMENT = ['ADHESION', 'DEPOT_OEUVRE'] as const;
 export type TypePaiement = (typeof TYPES_PAIEMENT)[number];
 
-export const TYPES_OPERATION_TARIF = ['ADHESION', 'DEPOT_OEUVRE', 'COTISATION'] as const;
+export const TYPES_OPERATION_TARIF = ['ADHESION', 'DEPOT_OEUVRE'] as const;
 export type TypeOperationTarif = (typeof TYPES_OPERATION_TARIF)[number];
 
 /** Mode de paiement : Mobile Money. */
@@ -135,9 +135,6 @@ export const STATUTS_PAIEMENT = [
   'REJETE',
 ] as const;
 export type StatutPaiement = (typeof STATUTS_PAIEMENT)[number];
-
-export const STATUTS_COTISATION = ['NON_PAYEE', 'PAYEE'] as const;
-export type StatutCotisation = (typeof STATUTS_COTISATION)[number];
 
 /* -------------------------------------------------------------- Notifications */
 

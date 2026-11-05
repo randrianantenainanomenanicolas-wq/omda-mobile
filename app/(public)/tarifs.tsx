@@ -23,11 +23,10 @@ const VALEUR_GENERAL = 'GENERAL';
 const LIBELLES_OPERATION: Record<TypeOperationTarif, string> = {
   ADHESION: 'Frais d’adhésion',
   DEPOT_OEUVRE: 'Dépôt d’une œuvre',
-  COTISATION: 'Cotisation annuelle',
 };
 
 function estTypeOperation(valeur: string): valeur is TypeOperationTarif {
-  return valeur === 'ADHESION' || valeur === 'DEPOT_OEUVRE' || valeur === 'COTISATION';
+  return valeur === 'ADHESION' || valeur === 'DEPOT_OEUVRE';
 }
 
 /**
@@ -36,7 +35,7 @@ function estTypeOperation(valeur: string): valeur is TypeOperationTarif {
  * Sans menu (navigation linéaire).
  * Données issues de `mockPublicContentService` :
  * - liste des tarifs & catégories (aucun montant codé en dur)
- * - choix du type d'opération (ADHESION / DEPOT_OEUVRE / COTISATION)
+ * - choix du type d'opération (ADHESION / DEPOT_OEUVRE)
  * - choix de catégorie si le tarif dépend de la catégorie
  * - montant estimatif calculé par le service
  * - mention obligatoire : « Estimation — le montant final est confirmé par le serveur. »

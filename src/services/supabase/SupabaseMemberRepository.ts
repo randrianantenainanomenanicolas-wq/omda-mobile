@@ -13,9 +13,8 @@
  * (les politiques RLS restent le garde-fou final) :
  *
  * - Profil (U)        : `utilisateur`, `membre`, `membre_categorie`, `categorie`
- * - Accueil (P)       : `candidat`, `oeuvre`, `cotisation`, `notification`
+ * - Accueil (P)       : `candidat`, `oeuvre`, `notification`
  * - Œuvres (Q, R, S)  : `oeuvre`, `attestation_diffusion`
- * - Cotisations (T)   : `cotisation`
  * - Notifications (V) : `notification` (+ annonces globales)
  *
  * Étape 23 — ÉCRITURES DES ŒUVRES ET DES CATÉGORIES branchées (validations,
@@ -45,7 +44,6 @@ import type {
   AttestationDiffusion,
   Candidat,
   Categorie,
-  Cotisation,
   Membre,
   MembreCategorie,
   Notification,
@@ -74,7 +72,6 @@ import {
   type FichierDepose,
   type FichierTeleverse,
   type InitierPaiementMembreEntree,
-  type ListerCotisationsEntree,
   type ListerNotificationsEntree,
   type ListerOeuvresEntree,
   type MemberRepository,
@@ -628,29 +625,22 @@ export class SupabaseMemberRepository implements MemberRepository {
 
   /* --------------------------------------------------- Accueil membre (P) */
 
-  /** Compteurs de l'accueil : salutation, œuvres, cotisation, notifications. */
+  /** Compteurs de l'accueil : salutation, œuvres, notifications. */
   async obtenirTableauDeBord(entree?: TableauDeBordEntree): Promise<Result<TableauDeBordMembre>> {
     const contexte = await contexteMembreReel();
     if (!contexte.ok) {
       return contexte;
     }
     const { utilisateur, membre } = contexte.valeur;
-    const annee = entree?.annee ?? new Date().getFullYear();
 
     try {
       const client = getSupabaseClient();
-      const [candidat, oeuvres, cotisation, notifications] = await Promise.all([
+      const [candidat, oeuvres, notifications] = await Promise.all([
         client.from('candidat').select('*').eq('utilisateur_id', utilisateur.id).maybeSingle(),
         client
           .from('oeuvre')
           .select('id', { count: 'exact', head: true })
           .eq('membre_id', membre.id),
-        client
-          .from('cotisation')
-          .select('*')
-          .eq('membre_id', membre.id)
-          .eq('annee', annee)
-          .maybeSingle(),
         client
           .from('notification')
           .select('id', { count: 'exact', head: true })
@@ -663,9 +653,6 @@ export class SupabaseMemberRepository implements MemberRepository {
       if (oeuvres.error) {
         return classerErreurRequete(oeuvres.error);
       }
-      if (cotisation.error) {
-        return classerErreurRequete(cotisation.error);
-      }
       if (notifications.error) {
         return classerErreurRequete(notifications.error);
       }
@@ -676,7 +663,6 @@ export class SupabaseMemberRepository implements MemberRepository {
         numero_adherent: membre.numero_adherent,
         statut_compte: membre.statut,
         nombre_oeuvres: oeuvres.count ?? 0,
-        cotisation_annee: cotisation.data as Cotisation | null,
         notifications_non_lues: notifications.count ?? 0,
       });
     } catch (cause) {
@@ -1000,62 +986,7 @@ export class SupabaseMemberRepository implements MemberRepository {
     return uploadFile(entree, options);
   }
 
-  /* ------------------------------------------------------- Cotisations (T) */
-
-  /** Cotisations du membre (année décroissante) ; filtre d'année optionnel. */
-  async listerCotisations(entree?: ListerCotisationsEntree): Promise<Result<Cotisation[]>> {
-    const contexte = await contexteMembreReel();
-    if (!contexte.ok) {
-      return contexte;
-    }
-    try {
-      let requete = getSupabaseClient()
-        .from('cotisation')
-        .select('*')
-        .eq('membre_id', contexte.valeur.membre.id);
-      if (entree?.annee !== undefined) {
-        requete = requete.eq('annee', entree.annee);
-      }
-      const reponse = await requete.order('annee', { ascending: false });
-      if (reponse.error) {
-        return classerErreurRequete(reponse.error);
-      }
-      return ok((reponse.data ?? []) as Cotisation[]);
-    } catch (cause) {
-      return erreurReseau(texteDe(cause));
-    }
-  }
-
-  /** Cotisation d'une année donnée (refus `COTISATION_INTROUVABLE` sinon). */
-  async obtenirCotisation(annee: number): Promise<Result<Cotisation>> {
-    const contexte = await contexteMembreReel();
-    if (!contexte.ok) {
-      return contexte;
-    }
-    try {
-      const reponse = await getSupabaseClient()
-        .from('cotisation')
-        .select('*')
-        .eq('membre_id', contexte.valeur.membre.id)
-        .eq('annee', annee)
-        .maybeSingle();
-      if (reponse.error) {
-        return classerErreurRequete(reponse.error);
-      }
-      const cotisation = reponse.data as Cotisation | null;
-      if (!cotisation) {
-        return erreurMetier(
-          CODES_ERREUR_MEMBRE.COTISATION_INTROUVABLE,
-          `Aucune cotisation n’est enregistrée pour l’année ${annee}.`,
-        );
-      }
-      return ok(cotisation);
-    } catch (cause) {
-      return erreurReseau(texteDe(cause));
-    }
-  }
-
-  /* --------------------------------------------------------- Paiements (S, T) */
+  /* --------------------------------------------------------- Paiements (S) */
 
   async initierPaiement(entree: InitierPaiementMembreEntree): Promise<Result<Paiement>> {
     return erreurNonBranche();

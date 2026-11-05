@@ -12,7 +12,7 @@
 | --- | --- | --- |
 | T1 | Navigation | Aucun menu (TabBar / Drawer / hamburger) côté **Public** et **Candidat** ; `Tabs` uniquement dans l'espace **Membre** connecté |
 | T2 | 4 états obligatoires | Chaque écran data-driven affiche : chargement / erreur + « Réessayer » / vide / contenu |
-| T3 | Règle du vert | Le vert (`status-success` / `circle-check`) n'apparaît qu'après une **confirmation serveur** (paiement `REUSSI`, cotisation `PAYEE`, œuvre `DEPOT_FINALISE`, session ouverte) ; jamais collé au bouton « Payer » |
+| T3 | Règle du vert | Le vert (`status-success` / `circle-check`) n'apparaît qu'après une **confirmation serveur** (paiement `REUSSI`, œuvre `DEPOT_FINALISE`, session ouverte) ; jamais collé au bouton « Payer » |
 | T4 | Aucune valeur en dur | Montants, tarifs, catégories, opérateurs et statuts viennent toujours d'un service (jamais de l'UI) |
 | T5 | Paiement | **Mobile Money (3 opérateurs : MVola, Orange Money, Airtel Money)** : mode et opérateurs affichés en information, **non sélectionnables un par un** ; aucun virement |
 | T6 | Langue | Français, vouvoiement ; devise Ariary (Ar) |
@@ -28,7 +28,7 @@
 | 1.1 | Accueil → « Documentation » | `LoadingState` puis liste des 3 articles publiés (titre + extrait) ; aucun article codé en dur |
 | 1.2 | Ouvrir un article, puis revenir à la liste | Contenu aéré par paragraphes, date de mise à jour affichée, retour fonctionnel |
 | 1.3 | Forcer une panne (voir §10) puis ouvrir « Documentation » | `ErrorState` + « Réessayer » ; après « Réessayer » la liste revient (aucun écran blanc) |
-| 1.4 | Accueil → « Tarifs & simulateur » | Grille des tarifs (`ADHESION`, `DEPOT_OEUVRE`, `COTISATION`) et catégories **chargées dynamiquement** |
+| 1.4 | Accueil → « Tarifs & simulateur » | Grille des tarifs (`ADHESION`, `DEPOT_OEUVRE`) et catégories **chargées dynamiquement** |
 | 1.5 | Opération `ADHESION` + catégorie « Musicien » | Estimation **120 000 Ar** + mention « Estimation — le montant final est confirmé par le serveur. » |
 | 1.6 | Opération `ADHESION` — autre catégorie (Artiste-auteur) | Estimation **150 000 Ar** ; sélecteur de catégorie affiché uniquement pour les opérations qui en dépendent |
 | 1.7 | Vérifier les catégories proposées | « Arts numériques » (désactivée) **n'apparaît pas** ; bannière « aucun paiement depuis cet écran » présente |
@@ -110,8 +110,8 @@
 
 | # | Étapes | Résultat attendu |
 | --- | --- | --- |
-| 6.1 | `membre@omda.mg` + `Omda2026!` | Connexion → espace membre (onglets Accueil, Œuvres, Cotisation, Profil, Notifications) ; **aucun menu** hors de ces onglets |
-| 6.2 | Accueil | Salutation + numéro d'adhérent, pastille de statut, nombre d'œuvres, cotisation 2026 (`NON_PAYEE`, montant du service), notifications non lues ; « Actualiser » rejoue l'appel |
+| 6.1 | `membre@omda.mg` + `Omda2026!` | Connexion → espace membre (onglets Accueil, Œuvres, Profil, Notifications) ; **aucun menu** hors de ces onglets |
+| 6.2 | Accueil | Salutation + numéro d'adhérent, pastille de statut, nombre d'œuvres, notifications non lues ; « Actualiser » rejoue l'appel |
 | 6.3 | Identifiants erronés | `IDENTIFIANTS_INVALIDES` : « E-mail ou mot de passe incorrect… » ; aucune session créée |
 | 6.4 | `desactive@omda.mg` | `COMPTE_DESACTIVE` : message dédié, connexion refusée |
 | 6.5 | `bloque@omda.mg` : 3 échecs consécutifs, puis une 4ᵉ tentative **même avec le bon mot de passe** | `TROP_DE_TENTATIVES` + action directe « Mot de passe oublié » |
@@ -163,18 +163,9 @@
 | 8.9 | Écran 2 : visibilité du filtre de catégorie (voir 7.4) | Après **acceptation** (catégorie active) : l'onglet Œuvres affiche le filtre par catégorie et l'onglet « Mes catégories » liste les 2 catégories |
 | 8.10 | Scénarios d'échec | Envoi impossible hors écran 2 (pas de vraie requête hors parcours) ; état vide « Vous avez déposé toutes les catégories supplémentaires » si plus rien n'est demandable |
 
-## 9) Cotisation annuelle — paiement de l'adhérent
+## 9) Cotisation annuelle — supprimée (étape 28C)
 
-**Prérequis** : session `membre@omda.mg`, onglet « Cotisation ».
-
-| # | Étapes | Résultat attendu |
-| --- | --- | --- |
-| 9.1 | Onglet « Cotisation » | Année **2026** avec statut `NON_PAYEE` (aucun vert), montant **100 000 Ar** fourni par le service, action secondaire « Payer ma cotisation » ; année **2025** déjà `PAYEE` sans action |
-| 9.2 | « Payer ma cotisation » | Écran de paiement : opérateur MVola en **information** (jamais bouton), numéro d'appel `+261…`, mention « Votre paiement est confirmé par votre opérateur avant validation. » |
-| 9.3 | `+261340000001` → « Payer » | Attente puis `REUSSI` confirmé ; retour forcé à la liste des cotisations |
-| 9.4 | Vérifier la cotisation après `REUSSI` | Pastille **verte** `PAYEE` + date de paiement ; **aucun bouton de paiement** ; notification « Paiement confirmé » dans l'onglet Notifications |
-| 9.5 | Accueil membre après `REUSSI` | Message de la carte cotisation : « Payée le … » (ou « Paiement confirmé par le serveur. ») |
-| 9.6 | Échecs (voir §5) : `ECHEC`, `REJETE`, délai dépassé | Message d'échec, retour possible vers la cotisation qui reste `NON_PAYEE`, aucun vert |
+La cotisation annuelle et son paiement ont été exclus de l'application (§19 des `docs/REGLES_METIER_V2.md`, ÉTAPE 28C) : la table `cotisation`, l'écran et l'onglet « Cotisation », le bloc cotisation du tableau de bord, les méthodes `listerCotisations` / `obtenirCotisation`, le type `StatutCotisation` et la valeur `COTISATION` des enums de paiement/tarif n'existent plus. **Aucun scénario ne s'applique à cette section** ; l'espace membre compte désormais 4 onglets (Accueil, Œuvres, Profil, Notifications).
 
 ## 10) Simulations de panne et options de service (mode mocks)
 
@@ -220,7 +211,6 @@ Les fonctions ci-dessous se déclenchent depuis le code (appelées dans `tools/v
 | §6 Membre | 14 cas | ☐ |
 | §7 Œuvres | 14 cas | ☐ |
 | §8 Catégorie supplémentaire | 10 cas | ☐ |
-| §9 Cotisation | 6 cas | ☐ |
 | §10 Panne / simulations | 6 cas | ☐ |
 | §11 Nouvelles règles étape 28 | 11 cas | ☐ |
 

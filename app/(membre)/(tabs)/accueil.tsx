@@ -7,15 +7,13 @@ import {
   EmptyState,
   ErrorState,
   Icone,
-  InfoBanner,
   LoadingState,
   ScreenContainer,
   StatusPill,
-  formaterMontantAriary,
   type NomIcone,
   type StatutPill,
 } from '../../../src/components/ui';
-import type { StatutCotisation, StatutUtilisateur } from '../../../src/models';
+import type { StatutUtilisateur } from '../../../src/models';
 import type { ErreurApp, TableauDeBordMembre } from '../../../src/services/contracts';
 import { mockMemberRepository } from '../../../src/services/mocks';
 
@@ -31,12 +29,6 @@ const STATUTS_COMPTE: Record<StatutUtilisateur, { variante: StatutPill; libelle:
   EN_ATTENTE_CHANGEMENT_MDP: { variante: 'pending', libelle: 'Mot de passe à renouveler' },
 };
 
-/** Statuts de cotisation : « payée » seulement si le serveur a confirmé le paiement. */
-const STATUTS_COTISATION: Record<StatutCotisation, { variante: StatutPill; libelle: string }> = {
-  PAYEE: { variante: 'success', libelle: 'Cotisation payée' },
-  NON_PAYEE: { variante: 'pending', libelle: 'Cotisation à régler' },
-};
-
 /** Message compréhensible selon la famille d'erreur (`Result`). */
 function traduireErreur(erreur: ErreurApp): string {
   if (erreur.type === 'metier') return erreur.message;
@@ -46,21 +38,10 @@ function traduireErreur(erreur: ErreurApp): string {
   return 'Votre espace membre est momentanément indisponible. Veuillez réessayer dans quelques instants.';
 }
 
-/** Date ISO affichée en `JJ/MM/AAAA` (formatage manuel, sans `Intl`). */
-function formaterDateCourte(dateIso: string | null): string {
-  if (!dateIso) return '';
-  const date = new Date(dateIso);
-  if (Number.isNaN(date.getTime())) return '';
-  const jour = String(date.getDate()).padStart(2, '0');
-  const mois = String(date.getMonth() + 1).padStart(2, '0');
-  return `${jour}/${mois}/${date.getFullYear()}`;
-}
-
-/** Aucune donnée à montrer : ni œuvre, ni cotisation, ni notification non lue. */
+/** Aucune donnée à montrer : ni œuvre ni notification non lue. */
 function estVide(tableauDeBord: TableauDeBordMembre): boolean {
   return (
     tableauDeBord.nombre_oeuvres === 0 &&
-    tableauDeBord.cotisation_annee === null &&
     tableauDeBord.notifications_non_lues === 0
   );
 }
@@ -141,24 +122,14 @@ function CarteCompteur({
   );
 }
 
-/** Détail de la cotisation : la date n'est affichée que si le serveur l'a confirmée. */
-function detailCotisation(cotisation: {
-  statut: StatutCotisation;
-  date_paiement: string | null;
-}): string {
-  if (cotisation.statut !== 'PAYEE') {
-    return 'Aucun paiement confirmé à ce jour.';
-  }
-  const datePaiement = formaterDateCourte(cotisation.date_paiement);
-  return datePaiement ? `Payée le ${datePaiement}.` : 'Paiement confirmé par le serveur.';
-}
+/* -------------------------------------------------------- Écran principal */
 
 /**
  * Accueil membre (écran P du cahier des charges).
  *
- * Données : `mockMemberRepository.obtenirTableauDeBord()` — aucun compteur, aucun
- * montant n'est codé en dur. Le tableau de bord est rechargé à chaque affichage
- * de l'onglet (les compteurs restent justes après une action ailleurs).
+ * Données : `mockMemberRepository.obtenirTableauDeBord()` — aucun compteur n'est
+ * codé en dur. Le tableau de bord est rechargé à chaque affichage de l'onglet
+ * (les compteurs restent justes après une action ailleurs).
  *
  * Les 4 états obligatoires sont gérés : `LoadingState`, `ErrorState` + « Réessayer »,
  * `EmptyState` (aucune activité) et contenu normal.
@@ -226,8 +197,6 @@ export default function AccueilMembreScreen() {
     );
   }
 
-  const cotisation = tableauDeBord.cotisation_annee;
-
   return (
     <ScreenContainer titre="Accueil" afficherRetour={false}>
       <EnteteMembre tableauDeBord={tableauDeBord} />
@@ -236,7 +205,7 @@ export default function AccueilMembreScreen() {
         <View className="mt-5">
           <EmptyState
             titre="Aucune activité pour le moment"
-            message="Vos œuvres, votre cotisation et vos notifications apparaîtront ici dès que l’OMDA les aura enregistrées."
+            message="Vos œuvres et vos notifications apparaîtront ici dès que l’OMDA les aura enregistrées."
             icone="folder-open"
             actionLibelle="Actualiser"
             onAction={() => void chargerTableauDeBord()}
@@ -254,33 +223,6 @@ export default function AccueilMembreScreen() {
             actionLibelle="Voir mes œuvres"
             onAction={() => router.push('/(membre)/(tabs)/oeuvres')}
           />
-
-          {cotisation ? (
-            <CarteCompteur
-              icone="money-bill-wave"
-              libelle={`Cotisation ${cotisation.annee}`}
-              valeur={formaterMontantAriary(cotisation.montant)}
-              detail={detailCotisation(cotisation)}
-              statut={STATUTS_COTISATION[cotisation.statut]}
-              actionLibelle="Voir ma cotisation"
-              onAction={() => router.push('/(membre)/(tabs)/cotisation')}
-            />
-          ) : (
-            <View className="w-full gap-3">
-              <InfoBanner
-                variante="info"
-                titre="Cotisation annuelle"
-                message="Aucune cotisation n’est enregistrée pour l’année en cours."
-                icone="money-bill-wave"
-              />
-              <Button
-                libelle="Voir ma cotisation"
-                variante="secondary"
-                pleineLargeur
-                onPress={() => router.push('/(membre)/(tabs)/cotisation')}
-              />
-            </View>
-          )}
 
           <CarteCompteur
             icone="bell"

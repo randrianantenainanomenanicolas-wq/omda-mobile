@@ -21,7 +21,7 @@ function traduireErreur(erreur: ErreurApp): string {
  * Déconnexion (règle métier W du cahier des charges).
  *
  * Écran dédié HORS onglets : la TabBar de l'espace membre reste celle prévue par
- * le cahier des charges (Accueil, Œuvres, Cotisation, Profil, Notifications) ;
+ * le cahier des charges (Accueil, Œuvres, Profil, Notifications) ;
  * la déconnexion est atteinte depuis l'onglet Profil.
  *
  * Parcours :

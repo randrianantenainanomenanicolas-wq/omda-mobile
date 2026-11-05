@@ -241,7 +241,7 @@ export default function ChangerMotDePasseScreen() {
         <InfoBanner
           variante="info"
           titre="Accès bloqué"
-          message="L’accès aux rubriques membres (œuvres, cotisations, profil, notifications) reste inaccessible tant que cette étape n’a pas été validée."
+          message="L’accès aux rubriques membres (œuvres, profil, notifications) reste inaccessible tant que cette étape n’a pas été validée."
         />
       </View>
     </ScreenContainer>

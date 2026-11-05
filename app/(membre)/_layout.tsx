@@ -5,7 +5,7 @@ import { useAuth } from '../../src/context/AuthContext';
 
 /**
  * Espace membre : Stack interne contenant les onglets `(tabs)`
- * (Accueil, Œuvres, Cotisation, Profil, Notifications) et les écrans
+ * (Accueil, Œuvres, Profil, Notifications) et les écrans
  * hors onglets `depot-oeuvre`, `modifier-oeuvre`, `fiche-oeuvre`, `paiement-membre`,
  * `demander-categorie`, `demander-categorie-oeuvres` et `deconnexion`.
  * C'est le SEUL espace de l'application à afficher une TabBar.

@@ -69,7 +69,6 @@ const STATUTS_FINAUX: StatutPaiement[] = [
 const OBJETS_PAIEMENT: Record<TypePaiement, string> = {
   ADHESION: 'Frais d’adhésion',
   DEPOT_OEUVRE: 'Frais de dépôt d’œuvre',
-  COTISATION: 'Cotisation annuelle',
 };
 
 /** Messages distincts imposés pour chaque issue défavorable du paiement. */
