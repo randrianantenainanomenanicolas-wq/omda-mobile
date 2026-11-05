@@ -56,6 +56,7 @@ import {
   SUPABASE_ANON_KEY,
   SUPABASE_URL,
 } from './client';
+import { avecReprise } from '../../utils/envoiRobuste';
 
 /* -------------------------------------------------------------- Constantes */
 
@@ -293,6 +294,7 @@ async function envoyerFichier(
       chemin_stockage: entree.chemin_stockage.trim(),
       mime_type: entree.mime_type,
       taille_octets: entree.taille_octets,
+      ...(entree.nom_lisible !== undefined ? { nom_lisible: entree.nom_lisible } : {}),
     });
   } catch (cause) {
     if (signal?.aborted) {
@@ -340,7 +342,18 @@ export async function uploadFile(
   if (!jeton.ok) {
     return jeton;
   }
-  return envoyerFichier(entree, jeton.valeur, options);
+  /*
+   * Envoi robuste (ÉTAPE 29B) : une coupure réseau ou une erreur serveur
+   * transitoire relance automatiquement l'envoi, dans la limite de
+   * `maxTentatives`, avec un délai croissant. Une annulation (`signal`) ou un
+   * refus définitif (format, taille, conflit, session) n'est jamais repris.
+   */
+  return avecReprise(() => envoyerFichier(entree, jeton.valeur, options), {
+    maxTentatives: options?.maxTentatives,
+    delaiRepriseMs: options?.delaiRepriseMs,
+    signal: options?.signal,
+    onReprise: options?.onReprise,
+  });
 }
 
 /* ------------------------------------------------- Consultation et suppression */

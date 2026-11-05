@@ -664,6 +664,17 @@ export async function simulerTeleversement(
     return panne;
   }
 
+  /*
+   * Reprise après échec (« envoi robuste ») : si le mode debug force des échecs
+   * réseau sur les prochains téléversements, on renvoie une erreur `reseau`
+   * (repreparable) et on décrémente le compteur, jusqu'à épuisement — le
+   * prochain appel (relancé par `avecReprise`) réussit alors.
+   */
+  if (optionsMock.echecs_televersement_simules > 0) {
+    optionsMock.echecs_televersement_simules -= 1;
+    return erreurReseau('Mode debug : échec réseau simulé pendant l’envoi.');
+  }
+
   const mimesAutorises = TYPES_MIME_AUTORISES[entree.bucket] as readonly string[];
   if (!mimesAutorises.includes(entree.mime_type)) {
     return erreurMetier(
@@ -701,6 +712,7 @@ export async function simulerTeleversement(
     chemin_stockage: entree.chemin_stockage,
     mime_type: entree.mime_type,
     taille_octets: entree.taille_octets,
+    ...(entree.nom_lisible !== undefined ? { nom_lisible: entree.nom_lisible } : {}),
   });
 }
 

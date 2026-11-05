@@ -48,6 +48,7 @@ import {
   refusMock,
   simulerTeleversement,
 } from './etatMock';
+import { avecReprise } from '../../utils/envoiRobuste';
 
 /** Âge minimal d'une demande d'adhésion (règle métier 7 : < 15 ans = refus). */
 export const AGE_MINIMUM_ADHESION = 15;
@@ -265,7 +266,13 @@ export class MockCandidateApi implements CandidateApi {
     entree: TeleversementEntree,
     options?: OptionsTeleversement,
   ): Promise<Result<FichierTeleverse>> {
-    return simulerTeleversement(entree, options);
+    // Envoi robuste : reprise automatique sur erreur réseau/serveur transitoire.
+    return avecReprise(() => simulerTeleversement(entree, options), {
+      maxTentatives: options?.maxTentatives,
+      delaiRepriseMs: options?.delaiRepriseMs,
+      signal: options?.signal,
+      onReprise: options?.onReprise,
+    });
   }
 
   /** Suivi public : statut, timeline, motif de rejet, montant dû si validée. */

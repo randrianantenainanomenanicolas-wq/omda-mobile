@@ -36,11 +36,16 @@ import type {
   PieceEntree,
 } from '../../src/services/contracts';
 import { candidateApi } from '../../src/services/factory';
+import { estModeMockCandidat } from '../../src/services/factory';
 import { mockPublicContentService } from '../../src/services/mocks';
 import {
   AIDE_ATTESTATION_FORMATS,
   MESSAGE_ATTESTATION_FORMAT_INVALIDE,
+  compresserSiImage,
   isAllowedAttestationMime,
+  natureDepuisPiece,
+  renommerFichier,
+  type NatureFichier,
 } from '../../src/utils';
 
 /* -------------------------------------------------------------- Constantes */
@@ -173,6 +178,15 @@ const MIME_PAR_EXTENSION: Record<string, TypeMime> = {
   wav: 'audio/wav',
 };
 
+/** Extension logique d'un type MIME autorisé (pour la clé de stockage, règle 6.1). */
+const EXTENSION_PAR_MIME: Record<string, string> = {
+  'image/jpeg': 'jpg',
+  'image/png': 'png',
+  'application/pdf': 'pdf',
+  'audio/mpeg': 'mp3',
+  'audio/wav': 'wav',
+};
+
 /** Tous les types MIME autorisés par le schéma (union des buckets). */
 const MIMES_CONNUS: readonly string[] = [
   ...TYPES_MIME_AUTORISES.pieces,
@@ -197,12 +211,6 @@ function deduireMime(nomFichier: string, mimeFourni: string | null | undefined):
 /** Type MIME autorisé pour un bucket donné. */
 function mimeAutorise(bucket: BucketStockage, mime: TypeMime): boolean {
   return (TYPES_MIME_AUTORISES[bucket] as readonly string[]).includes(mime);
-}
-
-/** Chemin de stockage transmis au service de téléversement. */
-function cheminStockage(bucket: BucketStockage, dossier: string, nomFichier: string): string {
-  const nomPropre = nomFichier.replace(/[^\w.\-]+/g, '_') || 'fichier';
-  return `${bucket}/${dossier}/${Date.now().toString(36)}-${nomPropre}`;
 }
 
 /** Taille lisible par l'utilisateur (Mo, une décimale). */
@@ -583,14 +591,67 @@ export default function DocumentsOeuvresScreen() {
         erreur: null,
       });
 
+      /*
+       * (2) Compression / conversion : toute image passe en JPEG avant envoi
+       * (règle 6.2) ; PDF et MP3 restent inchangés. En mode mock, aucune
+       * compression native : le fichier choisi repasse tel quel.
+       */
+      const prepare = await compresserSiImage(
+        {
+          fichier_uri: selection.uri,
+          mime_type: selection.mime_type,
+          taille_octets: selection.taille_octets,
+          nom_fichier: selection.nom,
+        },
+        estModeMockCandidat,
+      );
+      const mimeFinal = prepare.mime_type as TypeMime;
+      if (!mimeAutorise(bucket, mimeFinal)) {
+        definirEnvoi(cible, {
+          statut: 'erreur',
+          erreur: `Ce format de fichier n’est pas accepté pour ce dépôt (${LIBELLE_FORMATS[bucket]}).`,
+        });
+        return;
+      }
+
+      /*
+       * (1) Renommage : nom lisible conservé (accents/espaces OK) + clé de
+       * stockage sûre (sans accents, espaces ni caractères spéciaux, suffixe
+       * unique), selon la nature du fichier (règle 6.1).
+       */
+      const { nom, prenom, pseudonyme } = brouillon.identite;
+      const nature: NatureFichier =
+        cible.nature === 'piece'
+          ? natureDepuisPiece(cible.type)
+          : cible.nature === 'attestation'
+            ? 'ATTESTATION_DIFFUSION'
+            : 'OEUVRE';
+      const titreOeuvre =
+        cible.nature === 'oeuvre' || cible.nature === 'attestation'
+          ? (oeuvres.find((element) => element.cle === cible.cle)?.titre ?? selection.nom)
+          : undefined;
+      const extension =
+        EXTENSION_PAR_MIME[mimeFinal] ??
+        prepare.nom_fichier.split('.').pop()?.toLowerCase() ??
+        'bin';
+      const nommage = renommerFichier({
+        nature,
+        nom,
+        prenom,
+        pseudonyme: pseudonyme || undefined,
+        titre: titreOeuvre,
+        extension,
+      });
+
       const resultat = await candidateApi.televerserFichier(
         {
           bucket,
-          chemin_stockage: cheminStockage(bucket, dossier, selection.nom),
-          fichier_uri: selection.uri,
-          nom_fichier: selection.nom,
-          mime_type: selection.mime_type,
-          taille_octets: selection.taille_octets,
+          chemin_stockage: `${bucket}/${dossier}/${nommage.cle_storage}`,
+          fichier_uri: prepare.fichier_uri,
+          nom_fichier: prepare.nom_fichier,
+          mime_type: mimeFinal,
+          taille_octets: prepare.taille_octets,
+          nom_lisible: nommage.nom_lisible,
         },
         { onProgression: (pourcentage) => definirEnvoi(cible, { progression: pourcentage }) },
       );
@@ -607,7 +668,7 @@ export default function DocumentsOeuvresScreen() {
         erreur: null,
       });
     },
-    [brouillon.numero_dossier, definirEnvoi],
+    [brouillon.identite, brouillon.numero_dossier, definirEnvoi, oeuvres],
   );
 
   /** Sélection d'une image dans la bibliothèque (photo d'identité). */

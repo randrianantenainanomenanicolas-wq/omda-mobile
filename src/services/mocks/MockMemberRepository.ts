@@ -76,6 +76,7 @@ import {
   urlConsultationFichier,
   utilisateurCourant,
 } from './etatMock';
+import { avecReprise } from '../../utils/envoiRobuste';
 
 /** Contexte de la session membre (utilisateur + profil adhérent). */
 type ContexteMembre = { utilisateur: Utilisateur; membre: Membre };
@@ -720,7 +721,13 @@ export class MockMemberRepository implements MemberRepository {
     entree: TeleversementEntree,
     options?: OptionsTeleversement,
   ): Promise<Result<FichierTeleverse>> {
-    return simulerTeleversement(entree, options);
+    // Envoi robuste : reprise automatique sur erreur réseau/serveur transitoire.
+    return avecReprise(() => simulerTeleversement(entree, options), {
+      maxTentatives: options?.maxTentatives,
+      delaiRepriseMs: options?.delaiRepriseMs,
+      signal: options?.signal,
+      onReprise: options?.onReprise,
+    });
   }
 
   /* ------------------------------------------------------- Paiements (S) */

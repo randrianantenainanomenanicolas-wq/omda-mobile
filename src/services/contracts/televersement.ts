@@ -27,6 +27,12 @@ export type TeleversementEntree = {
   nom_fichier: string;
   mime_type: TypeMime;
   taille_octets: TailleOctets;
+  /**
+   * Nom lisible conservé en base et affiché aux agents (règle métier 6.1,
+   * produit par `renommerFichier`) : accents et espaces autorisés. La clé
+   * physique reste `chemin_stockage` (sans accents ni espaces). Facultatif : `televerserFichier` le renvoie quand il est fourni.
+   */
+  nom_lisible?: string;
 };
 
 export type OptionsTeleversement = {
@@ -34,10 +40,21 @@ export type OptionsTeleversement = {
   onProgression?: (pourcentage: number) => void;
   /** Permet d'annuler un envoi en cours (bouton « Annuler »). */
   signal?: AbortSignal;
+  /**
+   * Nombre total de tentatives en cas d'échec réseau (reprise automatique,
+   * règle « envoi robuste »). `1` = aucun retry ; défaut côté service = 3.
+   */
+  maxTentatives?: number;
+  /** Délai de base (ms) avant reprise (doublement à chaque tentative). */
+  delaiRepriseMs?: number;
+  /* Informe l'appelant qu'une nouvelle tentative démarre (retry). */
+  onReprise?: (tentative: number) => void;
 };
 
 export type FichierTeleverse = {
   chemin_stockage: string;
   mime_type: TypeMime;
   taille_octets: TailleOctets;
+  /** Nom lisible renvoyé par le service (règle 6.1), si fourni à l'entrée. */
+  nom_lisible?: string;
 };

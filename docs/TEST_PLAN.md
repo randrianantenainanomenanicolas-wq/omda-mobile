@@ -198,7 +198,34 @@ Les fonctions ci-dessous se déclenchent depuis le code (appelées dans `tools/v
 | 11.10 | Bulletin littéraire / dramatique | Libellés « Parolier » et « Parole ou partition » affichés tels quels |
 | 11.11 | Bulletin Figuratif | Marqué « à confirmer », champs communs uniquement, aucun champ inventé |
 
-## 12) Récapitulatif de campagne de tests
+## 12) Traitement des fichiers — étape 29B (renommage, compression, validations, envoi robuste)
+
+**Prérequis** : parcours adhésion §2 ou dépôt membre §7 ; mode mock par défaut. Les scénarios marqués **[RÉEL]** exigent un vrai téléphone (`EXPO_PUBLIC_USE_MOCKS_CANDIDATE=false`) : la compression native (`expo-image-manipulator`) ne s'exécute pas en mock.
+
+| # | Scénario | Résultat attendu |
+|---|----------|------------------|
+| 12.1 | Déposer une pièce « CIN » (nom Prénom accentués, ex. « N’dRova ») | Nom lisible conservé avec accents/espaces (« CIN … ») ; **clé de stockage** sans accent, sans espace, sans caractère spécial, avec suffixe unique et extension correcte |
+| 12.2 | Déposer selfie CIN, photo, acte de naissance, certificat de résidence | Chacun renommé « nature + nom prénom » (ex. « Selfie avec CIN … », « Photo de l'auteur … ») ; clé storage sûre |
+| 12.3 | Déposer le fichier d'une œuvre (titre + pseudonyme) | Nom lisible « titre – pseudonyme » ; clé storage sans accent/espace, suffixe unique |
+| 12.4 | Déposer l'attestation de diffusion d'une œuvre | Nom lisible « Attestation de diffusion – titre » ; clé storage préfixée `attestation-diffusion_…` |
+| 12.5 **[RÉEL]** | Photographier un document (CIN recto-verso) puis l'envoyer | Image convertie en **JPEG**, qualité 82 %, dimension max 2048 px ; texte/tampons/signatures restent LISIBLES par un agent ; poids réduit vs original |
+| 12.6 **[RÉEL]** | Joindre une image HEIC (iPhone) ou WebP | Convertie en JPEG avant envoi (jamais téléversée en HEIC/WebP, non acceptés par le bucket) |
+| 12.7 | Joindre un PDF et un MP3 | **Non retraités** : MIME, taille et contenu inchangés (aucune conversion) |
+| 12.8 | Œuvre **Musique** sans fichier MP3 (ex. PDF déposé en fichier principal) | Refus : message « Une œuvre musicale doit inclure un fichier audio au format MP3. » ; envoi bloqué |
+| 12.9 | Œuvre **Musique** avec MP3 mais **sans PDF de paroles** | Refus : « Une œuvre musicale doit inclure un PDF contenant les paroles. » |
+| 12.10 | Œuvre **Musique** MP3 + PDF paroles | Validation passée ; les deux fichiers sont acceptés |
+| 12.11 | Œuvre **Audiovisuel – film** sans PDF de résumé | Refus : « Un film doit être accompagné d'un PDF contenant le résumé. » |
+| 12.12 | Œuvre **Audiovisuel** hors film (ex. court-métrage non déclaré film) | Aucune exigence de résumé (règle 8.2 bornée à `est_film`) |
+| 12.13 | Fichier dépassant **20 Mo** (limite schéma + bucket) | Refus `FICHIER_TROP_VOLUMINEUX` ; message explicite (limite 20 Mo) |
+| 12.14 | Format non autorisé pour le bucket (ex. `.gif` dans `oeuvres`) | Refus `TYPE_FICHIER_NON_AUTORISE` ; aucune reprise (refus définitif) |
+| 12.15 **[RÉEL / mock]** | Couper le réseau pendant l'envoi (mock : `forcerEchecsTeleversement(1)`) | Progression repart à 0, **reprise automatique** (jusqu'à 3 tentatives, délai croissant) puis succès ; `onReprise` notifie l'écran |
+| 12.16 | Échec réseau persistant (mock : `forcerEchecsTeleversement(5)`, `maxTentatives=3`) | Après épuisement des tentatives, `ErrorState` + « Réessayer » ; aucune boucle infinie |
+| 12.17 | Annulation pendant l'envoi (bouton « Annuler », `signal` aborté) | `TELEVERSEMENT_ANNULE` ; **aucune** nouvelle tentative automatique |
+| 12.18 | Reprise manuelle après échec (« Réessayer » sur la tuile) | L'envoi est relancé ; la saisie de l'écran est conservée |
+
+> **Limites retenues (à valider)** : taille max **20 Mo** par fichier, identique côté app (`TAILLE_MAX_FICHIER_OCTETS`), côté schéma (`CHECK … <= 20971520`) et côté Storage (`file_size_limit = 20971520` pour `pieces` et `oeuvres`). MP3 : un fichier de 20 Mo correspond à ≈ 14 min en 192 kbps — encodage **≤ 192 kbps** recommandé pour tenir sans migration. Réglages bucket : privés, `allowed_mime_types` = {`pieces`: jpeg/png/pdf} et {`oeuvres`: mpeg/wav/pdf/jpeg/png}, alignés sur `TYPES_MIME_AUTORISES`.
+
+## 13) Récapitulatif de campagne de tests
 
 | Bloc | Scénarios | Statut |
 | --- | --- | --- |
@@ -213,6 +240,7 @@ Les fonctions ci-dessous se déclenchent depuis le code (appelées dans `tools/v
 | §8 Catégorie supplémentaire | 10 cas | ☐ |
 | §10 Panne / simulations | 6 cas | ☐ |
 | §11 Nouvelles règles étape 28 | 11 cas | ☐ |
+| §12 Traitement des fichiers (29B) | 18 cas | ☐ |
 
 **Critères de sortie d'une campagne** : tous les scénarios ci-dessus au vert, `npx tsc --noEmit` sans erreur, `npx --yes tsx tools/verif-mocks.ts` → « TOUS LES CONTROLES SONT PASSES ». Toute anomalie est consignée avec son numéro de scénario dans le rapport de recette.
 

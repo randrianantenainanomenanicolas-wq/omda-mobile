@@ -2,6 +2,7 @@ import { TAILLE_MAX_FICHIER_OCTETS, type TypeMime } from '../src/models';
 import {
   definirDelaisMock,
   definirOperateurActif,
+  forcerEchecsTeleversement,
   forcerErreurReseau,
   forcerErreurServeur,
   mockAuthService,
@@ -12,6 +13,21 @@ import {
   reinitialiserEchecsConnexion,
   reinitialiserOptionsMock,
 } from '../src/services/mocks';
+import {
+  COMPRESSION_JPEG_NORMALISEE,
+  DIMENSION_MAX_PX,
+  QUALITE_COMPRESSION_JPEG,
+  avecReprise,
+  compresserSiImage,
+  estErreurReprebable,
+  estImageCompressible,
+  estSansTraitement,
+  natureDepuisPiece,
+  renommerFichier,
+  validerDocumentsParCategorie,
+  validerTaillePreparee,
+} from '../src/utils';
+import { erreurReseau, ok } from '../src/services/contracts';
 
 /**
  * Vérification d'exécution des mocks (smoke test) : contrôles sur les 4 mocks
@@ -114,6 +130,7 @@ async function principal(): Promise<void> {
   await scenarioMobileMoney();
   await scenarioPannes();
   await scenarioMembre();
+  await scenarioTraitementFichiers();
 
   console.log(
     echecs === 0 ? 'TOUS LES CONTROLES SONT PASSES' : `${echecs} controle(s) en echec`,
@@ -1307,6 +1324,264 @@ async function scenarioMembre(): Promise<void> {
   await scenarioDemandeCategorieOeuvres();
   await scenarioMembreNotifications();
   await scenarioMembreComptes();
+}
+
+/**
+ * ÉTAPE 29B — traitement des fichiers : renommage (règle 6.1), compression /
+ * conversion (règle 6.2), validations par catégorie (règles 8.1 / 8.2) et envoi
+ * robuste avec reprise après échec réseau.
+ */
+async function scenarioTraitementFichiers(): Promise<void> {
+  /* ---------------------------------------------- 1. Renommage (règle 6.1) */
+  const cin = renommerFichier({
+    nature: 'CIN',
+    nom: 'RAKOTO',
+    prenom: 'Jean',
+    extension: 'pdf',
+  });
+  verifier(
+    'renommage CIN : nom lisible « CIN RAKOTO Jean » (accents/espaces autorisés)',
+    cin.nom_lisible === 'CIN RAKOTO Jean',
+    cin.nom_lisible,
+  );
+  verifier(
+    'renommage CIN : clé storage sûre (sans accent, espace ni caractère spécial, suffixe unique, extension .pdf)',
+    /^[A-Za-z0-9._-]+$/.test(cin.cle_storage) &&
+      /^CIN_RAKOTO-Jean_[a-z0-9]{8}\.pdf$/.test(cin.cle_storage),
+    cin.cle_storage,
+  );
+
+  const selfie = renommerFichier({
+    nature: natureDepuisPiece('SELFIE_CIN'),
+    nom: 'RAKOTO',
+    prenom: 'Jean',
+    extension: 'jpg',
+  });
+  verifier(
+    'nature depuis TypePiece SELFIE_CIN → libellé lisible « Selfie avec CIN »',
+    selfie.nom_lisible === 'Selfie avec CIN RAKOTO Jean',
+    selfie.nom_lisible,
+  );
+
+  const oeuvre = renommerFichier({
+    nature: 'OEUVRE',
+    nom: 'RAKOTO',
+    prenom: 'Jean',
+    pseudonyme: 'Lolo',
+    titre: 'La varangue',
+    extension: 'mp3',
+  });
+  verifier(
+    'renommage œuvre : « titre + pseudonyme » en lisible',
+    oeuvre.nom_lisible === 'La varangue – Lolo',
+    oeuvre.nom_lisible,
+  );
+  verifier(
+    'renommage œuvre : clé storage sans accent (ç, é translittérés) ni espace',
+    /^[A-Za-z0-9._-]+$/.test(oeuvre.cle_storage) && oeuvre.cle_storage.endsWith('.mp3'),
+    oeuvre.cle_storage,
+  );
+
+  const attestation = renommerFichier({
+    nature: 'ATTESTATION_DIFFUSION',
+    nom: 'RAKOTO',
+    prenom: 'Jean',
+    pseudonyme: 'Lolo',
+    titre: 'La varangue',
+    extension: 'pdf',
+  });
+  verifier(
+    'renommage attestation : mention « Attestation de diffusion – » + œuvre',
+    attestation.nom_lisible === 'Attestation de diffusion – La varangue',
+    attestation.nom_lisible,
+  );
+
+  /* --------------------------- 2. Compression / conversion (règle 6.2) */
+  verifier(
+    'HEIC et WebP détectés comme images à compresser',
+    estImageCompressible('image/heic') &&
+      estImageCompressible('image/webp') &&
+      estImageCompressible('image/png'),
+  );
+  verifier(
+    'PDF, MP3, WAV jamais retraités (passe-partout)',
+    estSansTraitement('application/pdf') &&
+      estSansTraitement('audio/mpeg') &&
+      estSansTraitement('audio/wav') &&
+      !estImageCompressible('application/pdf'),
+  );
+  verifier(
+    'réglages de compression retenus (qualité 82 % = 0,82 normalisé, 2048 px max)',
+    QUALITE_COMPRESSION_JPEG === 82 &&
+      COMPRESSION_JPEG_NORMALISEE === 0.82 &&
+      DIMENSION_MAX_PX === 2048,
+  );
+
+  // Mode mock : aucune compression native, l'entrée repasse inchangée.
+  const pdfPrepare = await compresserSiImage(
+    {
+      fichier_uri: 'file:///tmp/doc.pdf',
+      mime_type: 'application/pdf',
+      taille_octets: 1024,
+      nom_fichier: 'doc.pdf',
+    },
+    () => true,
+  );
+  verifier(
+    'compresserSiImage : PDF inchangé en sortie (mime + taille conservés)',
+    pdfPrepare.mime_type === 'application/pdf' && pdfPrepare.taille_octets === 1024,
+  );
+
+  const heicPrepare = await compresserSiImage(
+    {
+      fichier_uri: 'file:///tmp/photo.heic',
+      mime_type: 'image/heic',
+      taille_octets: 4000000,
+      nom_fichier: 'photo.heic',
+    },
+    () => true,
+  );
+  verifier(
+    'compresserSiImage : en mode mock, HEIC passe sans compression native (URI conservée)',
+    heicPrepare.fichier_uri === 'file:///tmp/photo.heic',
+  );
+
+  verifier(
+    'validerTaillePreparee : au-delà de 20 Mo = message, en dessous = null',
+    validerTaillePreparee(TAILLE_MAX_FICHIER_OCTETS) === null &&
+      validerTaillePreparee(TAILLE_MAX_FICHIER_OCTETS + 1) !== null,
+  );
+
+  /* ------------------------------- 3. Validations par catégorie (règles 8) */
+  const musiqueSansMp3 = validerDocumentsParCategorie({
+    type_bulletin: 'MUSIQUE_ACR',
+    fichier: { mime_type: 'application/pdf', nom_fichier: 'a.pdf', taille_octets: 10 },
+    document_annexe: { mime_type: 'application/pdf', nom_fichier: 'paroles.pdf', taille_octets: 10 },
+  });
+  verifier(
+    'musique : fichier non MP3 refusé',
+    !musiqueSansMp3.valide && musiqueSansMp3.erreurs.length === 1,
+    JSON.stringify(musiqueSansMp3.erreurs),
+  );
+
+  const musiqueSansParoles = validerDocumentsParCategorie({
+    type_bulletin: 'MUSIQUE_COLLECTIVE',
+    fichier: { mime_type: 'audio/mpeg', nom_fichier: 'chanson.mp3', taille_octets: 10 },
+    document_annexe: null,
+  });
+  verifier(
+    'musique : PDF de paroles manquant refusé',
+    !musiqueSansParoles.valide && musiqueSansParoles.erreurs.length === 1,
+    JSON.stringify(musiqueSansParoles.erreurs),
+  );
+
+  const musiqueComplete = validerDocumentsParCategorie({
+    type_bulletin: 'MUSIQUE_ACR',
+    fichier: { mime_type: 'audio/mpeg', nom_fichier: 'chanson.mp3', taille_octets: 10 },
+    document_annexe: { mime_type: 'application/pdf', nom_fichier: 'paroles.pdf', taille_octets: 10 },
+  });
+  verifier('musique : MP3 + PDF paroles = valide', musiqueComplete.valide);
+
+  const filmSansResume = validerDocumentsParCategorie({
+    type_bulletin: 'AUDIOVISUEL',
+    est_film: true,
+    fichier: { mime_type: 'image/png', nom_fichier: 'affiche.png', taille_octets: 10 },
+    document_annexe: null,
+  });
+  verifier(
+    'audiovisuel (film) : PDF de résumé manquant refusé',
+    !filmSansResume.valide && filmSansResume.erreurs.length === 1,
+  );
+
+  const filmAvecResume = validerDocumentsParCategorie({
+    type_bulletin: 'AUDIOVISUEL',
+    est_film: true,
+    fichier: { mime_type: 'image/png', nom_fichier: 'affiche.png', taille_octets: 10 },
+    document_annexe: { mime_type: 'application/pdf', nom_fichier: 'resume.pdf', taille_octets: 10 },
+  });
+  verifier('audiovisuel (film) : PDF résumé présent = valide', filmAvecResume.valide);
+
+  const audiovisuelHorsFilm = validerDocumentsParCategorie({
+    type_bulletin: 'AUDIOVISUEL',
+    est_film: false,
+    fichier: { mime_type: 'image/png', nom_fichier: 'capture.png', taille_octets: 10 },
+  });
+  verifier(
+    'audiovisuel hors film : aucune exigence de résumé (règle 8.2 bornée)',
+    audiovisuelHorsFilm.valide,
+  );
+
+  const litteraire = validerDocumentsParCategorie({
+    type_bulletin: 'LITTERAIRE',
+    fichier: { mime_type: 'application/pdf', nom_fichier: 'manuel.pdf', taille_octets: 10 },
+  });
+  verifier('littéraire : pas de règle catégorielle supplémentaire', litteraire.valide);
+
+  /* ------------------------------------ 4. Envoi robuste (reprise réseau) */
+  verifier(
+    'erreur repreparable : réseau et 5xx oui, métier et 409 non',
+    estErreurReprebable({ type: 'reseau', message: '' }) &&
+      estErreurReprebable({ type: 'serveur', message: '', statut_http: 503 }) &&
+      !estErreurReprebable({ type: 'metier', code: 'X', message: '' }) &&
+      !estErreurReprebable({ type: 'serveur', message: '', statut_http: 409 }),
+  );
+
+  // Reprise pure : deux échecs réseau simulés puis succès, délai injecté nul.
+  let appels = 0;
+  const reprise = await avecReprise(
+    async () => {
+      appels += 1;
+      if (appels < 3) {
+        return erreurReseau('instable');
+      }
+      return ok('depose' as const);
+    },
+    { maxTentatives: 3, delaiRepriseMs: 0, attendre: async () => {} },
+  );
+  verifier(
+    'avecReprise : 2 échecs réseau puis succès à la 3e tentative',
+    reprise.ok && appels === 3,
+    `appels=${appels}`,
+  );
+
+  // Reprise bornée : toutes les tentatives échouent -> dernière erreur réseau.
+  let appelsEchec = 0;
+  const epuisees = await avecReprise<string>(
+    async () => {
+      appelsEchec += 1;
+      return erreurReseau('instable');
+    },
+    { maxTentatives: 2, delaiRepriseMs: 0, attendre: async () => {} },
+  );
+  verifier(
+    'avecReprise : tentatives bornées, erreur réseau remontée après épuisement',
+    !epuisees.ok && epuisees.erreur.type === 'reseau' && appelsEchec === 2,
+    `appels=${appelsEchec}`,
+  );
+
+  // Reprise via le MOCK : 1 échec forcé puis succès (chemin bout en bout).
+  forcerEchecsTeleversement(1);
+  const progressionFinale: number[] = [];
+  const envoiRepris = await mockMemberRepository.televerserFichier(
+    {
+      bucket: 'oeuvres',
+      chemin_stockage: 'oeuvres/brouillons/repris.pdf',
+      fichier_uri: 'file:///tmp/repris.pdf',
+      nom_fichier: 'repris.pdf',
+      mime_type: 'application/pdf',
+      taille_octets: 2048,
+      nom_lisible: 'Reprise test',
+    },
+    { maxTentatives: 3, delaiRepriseMs: 0, onProgression: (p) => progressionFinale.push(p) },
+  );
+  verifier(
+    'mock : échec réseau forcé puis reprise automatique jusqu’au succès',
+    envoiRepris.ok &&
+      envoiRepris.valeur.nom_lisible === 'Reprise test' &&
+      progressionFinale[progressionFinale.length - 1] === 100,
+    envoiRepris.ok ? 'ok' : JSON.stringify(envoiRepris.erreur),
+  );
+  forcerEchecsTeleversement(0);
 }
 
 principal().catch((erreur) => {

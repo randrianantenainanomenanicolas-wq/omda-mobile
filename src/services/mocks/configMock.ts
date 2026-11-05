@@ -26,6 +26,12 @@ export type OptionsMock = {
   probabilite_erreur_serveur: number;
   /** Nombre d'interrogations avant que Mobile Money ne renvoie son statut final. */
   polls_avant_statut_final: number;
+  /**
+   * Nombre d'échecs réseau SIMULÉS sur les PREMIERS téléversements (puis
+   * réussite) : permet de vérifier la REPRISE automatique (« envoi robuste »).
+   * 0 = aucun échec forcé (comportement normal).
+   */
+  echecs_televersement_simules: number;
 };
 
 export const OPTIONS_MOCK_PAR_DEFAUT: OptionsMock = {
@@ -36,6 +42,7 @@ export const OPTIONS_MOCK_PAR_DEFAUT: OptionsMock = {
   probabilite_erreur_reseau: 0,
   probabilite_erreur_serveur: 0,
   polls_avant_statut_final: 2,
+  echecs_televersement_simules: 0,
 };
 
 /** Réglages courants du mode debug (objet mutable, volontairement exposé). */
@@ -70,4 +77,12 @@ export function definirProbabilitesErreur(probabilites: { reseau?: number; serve
   if (probabilites.serveur !== undefined) {
     optionsMock.probabilite_erreur_serveur = Math.min(1, Math.max(0, probabilites.serveur));
   }
+}
+
+/**
+ * Force `nombre` échecs réseau sur les prochains téléversements (puissance de la
+ * reprise automatique). `0` rétablit le comportement normal.
+ */
+export function forcerEchecsTeleversement(nombre: number): void {
+  optionsMock.echecs_televersement_simules = Math.max(0, Math.floor(nombre));
 }
