@@ -4,12 +4,38 @@ import { Text, View } from 'react-native';
 
 import {
   Button,
+  DateField,
   InfoBanner,
   ScreenContainer,
   StepProgress,
   TextField,
 } from '../../src/components/ui';
 import { useAdhesionDraft } from '../../src/context/AdhesionDraftContext';
+import { aujourdhuiLocal } from '../../src/utils/dates';
+
+/**
+ * Basse date acceptée pour une naissance : 1er janvier 1900 (locale, jamais UTC).
+ * Toute valeur antérieure est hors bornes OMDA.
+ */
+const DATE_MIN_NAISSANCE = new Date(1900, 0, 1, 0, 0, 0, 0);
+
+/**
+ * Date d'ouverture du sélecteur lorsque le champ est vide : il y a 18 ans,
+ * jour pour jour (composants locaux). Elle ne préremplit PAS le champ —
+ * `date_naissance` reste `''` tant que l'utilisateur ne valide pas.
+ */
+function dateInitialeNaissance(): Date {
+  const aujourdhui = aujourdhuiLocal();
+  return new Date(
+    aujourdhui.getFullYear() - 18,
+    aujourdhui.getMonth(),
+    aujourdhui.getDate(),
+    0,
+    0,
+    0,
+    0,
+  );
+}
 
 /**
  * Étape 1 — Identité (écran H du cahier des charges).
@@ -165,18 +191,20 @@ export default function IdentiteScreen() {
           onChangeValeur={(val) => void mettreAJourIdentite({ prenom: val })}
         />
 
-        <TextField
+        <DateField
+          mode="date"
           libelle="Date de naissance"
           valeur={identite.date_naissance}
-          placeholder="1996-04-12"
-          aide="Format : AAAA-MM-JJ"
-          clavier="numeric"
-          maxCaracteres={10}
-          obligatoire
-          erreur={erreurDate}
           onChangeValeur={(val) => {
             void mettreAJourIdentite({ date_naissance: val });
           }}
+          placeholder="Choisir une date"
+          dateMin={DATE_MIN_NAISSANCE}
+          dateMax={aujourdhuiLocal()}
+          dateInitiale={dateInitialeNaissance()}
+          aide="Sélectionnez votre date de naissance dans le calendrier."
+          obligatoire
+          erreur={erreurDate}
         />
 
         {age !== null && !estMoinsDe15Ans ? (

@@ -5,6 +5,7 @@ import { Text, View } from 'react-native';
 
 import {
   Button,
+  DateField,
   EmptyState,
   ErrorState,
   Icone,
@@ -834,12 +835,15 @@ export default function DepotOeuvreScreen() {
           desactive={envoiEnCours}
         />
 
-        <TextField
+        <DateField
+          mode="annee"
           libelle="Année de création (facultatif)"
           valeur={annee}
           onChangeValeur={setAnnee}
-          clavier="number-pad"
-          maxCaracteres={4}
+          placeholder="Choisir une année"
+          anneeMin={ANNEE_MINIMUM}
+          anneeMax={anneeMax}
+          effacable
           aide={`Entre ${ANNEE_MINIMUM} et ${anneeMax}.`}
           erreur={erreurAnnee ?? undefined}
           desactive={envoiEnCours}

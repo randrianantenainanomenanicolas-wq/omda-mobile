@@ -27,5 +27,6 @@
 - Soumission d’une œuvre par un membre : confirmation par ressaisie du mot de passe actuel (côté serveur), SMS abandonné. Sans autorisation valide, l’œuvre reste « Brouillon ».
 - Jamais de clé `service_role` dans l’app ni de secret dans le code client.
 - Chaque écran data-driven : Loading / Erreur + “Réessayer” / Vide / Contenu.
+- Aucune saisie manuelle de date : tout champ de date ou d’année utilise `DateField` (mode `date` ou `annee`) avec le sélecteur natif (Android) ou la modale localisée `fr-FR` (iOS), et une liste défilante pour les années. Les formats de stockage (`AAAA-MM-JJ` et `AAAA`) restent inchangés.
 - Ne faire QUE l’étape demandée (pas d’anticipation).
 - À la fin de l’étape : mettre à jour docs/PROGRESS.md + vérifier `npx tsc --noEmit`.

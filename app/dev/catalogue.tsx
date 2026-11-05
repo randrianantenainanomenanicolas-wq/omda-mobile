@@ -4,6 +4,7 @@ import { Text, View } from 'react-native';
 import {
   AmountCard,
   Button,
+  DateField,
   EmptyState,
   ErrorState,
   InfoBanner,
@@ -76,6 +77,8 @@ export default function CatalogueDeveloppement() {
   const [telephone, setTelephone] = useState('34');
   const [adresse, setAdresse] = useState('Lot 12 Bis, Antananarivo 101');
   const [categorie, setCategorie] = useState<string | null>(null);
+  const [dateNaissance, setDateNaissance] = useState('');
+  const [anneeCreation, setAnneeCreation] = useState('');
 
   const erreurTelephone =
     telephone.length > 0 && telephone.length < 9
@@ -147,6 +150,61 @@ export default function CatalogueDeveloppement() {
           valeur={null}
           onChangeValeur={AUCUNE_ACTION}
           options={[]}
+        />
+      </Section>
+
+      <Section
+        titre="Dates et années"
+        description="Aucune saisie manuelle : tout champ de date ou d’année utilise `DateField` (mode `date` natif ou mode `annee` maison)."
+      >
+        <DateField
+          mode="date"
+          libelle="Date de naissance (mode date, obligatoire)"
+          valeur={dateNaissance}
+          onChangeValeur={setDateNaissance}
+          placeholder="Choisir une date"
+          aide="Sélecteur Android natif ou modale iOS (spinner, locale fr-FR)."
+          dateMin={new Date(1900, 0, 1)}
+          dateMax={new Date(new Date().getFullYear(), 11, 31)}
+          dateInitiale={new Date(new Date().getFullYear() - 18, 0, 1)}
+          obligatoire
+        />
+        <DateField
+          mode="date"
+          libelle="Date avec erreur (état erreur)"
+          valeur=""
+          onChangeValeur={AUCUNE_ACTION}
+          placeholder="Choisir une date"
+          erreur="La date de naissance est obligatoire."
+          obligatoire
+        />
+        <DateField
+          mode="date"
+          libelle="Date désactivée (état désactivé)"
+          valeur="1996-04-12"
+          onChangeValeur={AUCUNE_ACTION}
+          desactive
+          aide="Exemple : valeur déjà confirmée par le serveur, non modifiable."
+        />
+        <DateField
+          mode="annee"
+          libelle="Année de création (mode annee, facultatif et effacable)"
+          valeur={anneeCreation}
+          onChangeValeur={setAnneeCreation}
+          placeholder="Choisir une année"
+          anneeMin={1900}
+          anneeMax={new Date().getFullYear()}
+          effacable
+          aide="Liste défilante maison : le sélecteur natif ne propose pas d’année seule."
+        />
+        <DateField
+          mode="annee"
+          libelle="Année présélectionnée avec borne haute custom"
+          valeur="2024"
+          onChangeValeur={AUCUNE_ACTION}
+          anneeMin={2000}
+          anneeMax={2030}
+          effacable
         />
       </Section>
 

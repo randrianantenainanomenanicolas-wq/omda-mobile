@@ -2,6 +2,7 @@ export { AmountCard, formaterMontantAriary } from './AmountCard';
 export { AppHeader } from './AppHeader';
 export { AudioPreview } from './AudioPreview';
 export { Button, type VarianteBouton } from './Button';
+export { DateField, type ModeDateField, type PropsDateField } from './DateField';
 export { EmptyState } from './EmptyState';
 export { ErrorState } from './ErrorState';
 export { Icone, type NomIcone } from './Icone';
