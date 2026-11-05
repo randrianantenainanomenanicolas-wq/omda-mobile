@@ -8,13 +8,21 @@
  * Le mode mock reste le défaut : cette classe n'est instanciée que si
  * `EXPO_PUBLIC_USE_MOCKS=false` (cf. `src/services/factory.ts`).
  */
-import type { Categorie, Documentation, OperateurMobileMoney, Tarif } from '../../models';
+import type {
+  AncienChefLieuProvince,
+  Categorie,
+  Documentation,
+  OperateurMobileMoney,
+  Tarif,
+} from '../../models';
 import type {
   EstimationMontant,
   EstimationMontantEntree,
   ListerTarifsEntree,
   PublicContentService,
   Result,
+  TexteEngagement,
+  TexteEngagementEntree,
 } from '../contracts';
 import { erreurNonBranche } from '../nonImplemente';
 
@@ -31,6 +39,18 @@ export class SupabasePublicContentService implements PublicContentService {
 
   /** Catégories ACTIVES proposables à l'adhésion. */
   async listerCategories(): Promise<Result<Categorie[]>> {
+    return erreurNonBranche();
+  }
+
+  /** Anciens chef-lieux de province ACTIFS (référentiel en base). */
+  async listerAnciensChefLieux(): Promise<Result<AncienChefLieuProvince[]>> {
+    return erreurNonBranche();
+  }
+
+  /** Texte d'engagement malgache servi avec variables substituées. */
+  async obtenirTexteEngagement(
+    _entree: TexteEngagementEntree,
+  ): Promise<Result<TexteEngagement>> {
     return erreurNonBranche();
   }
 

@@ -1,5 +1,5 @@
 import { router } from 'expo-router';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Text, View } from 'react-native';
 
 import {
@@ -7,10 +7,14 @@ import {
   DateField,
   InfoBanner,
   ScreenContainer,
+  SelectField,
   StepProgress,
   TextField,
+  type OptionSelect,
 } from '../../src/components/ui';
 import { useAdhesionDraft } from '../../src/context/AdhesionDraftContext';
+import { TERRITOIRE_OMDA_FIXE, type AncienChefLieuProvince } from '../../src/models';
+import { mockPublicContentService } from '../../src/services/mocks';
 import { aujourdhuiLocal } from '../../src/utils/dates';
 
 /**
@@ -38,18 +42,28 @@ function dateInitialeNaissance(): Date {
 }
 
 /**
- * Étape 1 — Identité (écran H du cahier des charges).
+ * Étape 1 — Identité (écran H du cahier des charges, fiche d'adhésion
+ * `docs/FORMULAIRES.md` §1).
  *
- * Sans menu (navigation linéaire).
- * Champs :
- * - Nom, Prénom
- * - Date de naissance (format AAAA-MM-JJ) : calcul de l'âge
- *   - Si < 15 ans : redirection bloquante vers l'écran `refus-age`
- *   - Si 15–17 ans : InfoBanner indiquant l'autorisation parentale obligatoire
- * - Numéro CIN (12 chiffres)
- * - Téléphone (+261…)
- * - E-mail
- * - Adresse postale
+ * Sans menu (navigation linéaire). Tous les champs de la fiche native sont
+ * représentés ; les formats de stockage restent `AAAA-MM-JJ` (dates) et
+ * chaîne libre (textes). Le brouillon local est rétro-compatible : les
+ * nouveaux champs apparaissent vides sur les brouillons déjà enregistrés.
+ *
+ * Champs alignés sur la fiche d'adhésion :
+ * - identité civile : nom, prénom, date + lieu de naissance, profession ;
+ * - pseudonyme (règle 4 : obligatoire, NON unique) + groupe (règle 3 :
+ *   obligatoire, le pseudonyme peut le remplacer à l'affichage) ;
+ * - CIN : numéro 12 chiffres + lieu de délivrance + date de délivrance ;
+ * - coordonnées : téléphone +261, e-mail, adresse ;
+ * - ancien chef-lieu de province : liste de référence servie par le service,
+ *   « juste après l'adresse » ;
+ * - personne à prévenir (nom + contact) ;
+ * - compte bancaire FACULTATIF (jamais bloquant, règle 3) ;
+ * - territoire OMDA : valeur fixe affichée en lecture seule (règle 3) ;
+ * - le « lieu de réception du droit » n'existe PAS dans l'app (règle 3).
+ *
+ * Règle 4 étape 28D : tous les champs date utilisent `DateField`.
  *
  * Sauvegarde continue dans le store persistant `AdhesionDraft`.
  */
@@ -64,6 +78,31 @@ export default function IdentiteScreen() {
 
   const identite = brouillon.identite;
   const [tentativeSoumission, setTentativeSoumission] = useState(false);
+  const [lieux, setLieux] = useState<AncienChefLieuProvince[]>([]);
+  const [erreurChargementLieux, setErreurChargementLieux] = useState<string | null>(null);
+
+  // Référentiel servi par le service : la liste n'est JAMAIS codée en dur.
+  useEffect(() => {
+    let actif = true;
+    void (async () => {
+      const res = await mockPublicContentService.listerAnciensChefLieux();
+      if (!actif) return;
+      if (res.ok) {
+        setLieux(res.valeur);
+        setErreurChargementLieux(null);
+      } else {
+        setErreurChargementLieux(res.erreur.message);
+      }
+    })();
+    return () => {
+      actif = false;
+    };
+  }, []);
+
+  const optionsLieux: OptionSelect[] = lieux.map((l) => ({
+    valeur: l.id,
+    libelle: l.libelle,
+  }));
 
   const validerNom = (val: string) => (!val.trim() ? 'Le nom est obligatoire.' : undefined);
   const validerPrenom = (val: string) => (!val.trim() ? 'Le prénom est obligatoire.' : undefined);
@@ -78,7 +117,14 @@ export default function IdentiteScreen() {
     }
     return undefined;
   };
-
+  const validerLieuNaissance = (val: string) =>
+    !val.trim() ? 'Le lieu de naissance est obligatoire.' : undefined;
+  const validerPseudonyme = (val: string) =>
+    !val.trim() ? 'Le pseudonyme est obligatoire.' : undefined;
+  const validerGroupe = (val: string) =>
+    !val.trim() ? 'Le groupe est obligatoire (le pseudonyme peut le remplacer à l’affichage).' : undefined;
+  const validerProfession = (val: string) =>
+    !val.trim() ? 'La profession est obligatoire.' : undefined;
   const validerCin = (val: string) => {
     const propre = val.replace(/\s+/g, '');
     if (!propre) return 'Le numéro de CIN est obligatoire.';
@@ -87,7 +133,10 @@ export default function IdentiteScreen() {
     }
     return undefined;
   };
-
+  const validerCinLieu = (val: string) =>
+    !val.trim() ? 'Le lieu de délivrance de la CIN est obligatoire.' : undefined;
+  const validerCinDate = (val: string) =>
+    !val.trim() ? 'La date de délivrance de la CIN est obligatoire.' : undefined;
   const validerTelephone = (val: string) => {
     const propre = val.replace(/\s+/g, '');
     if (!propre || propre === '+261') return 'Le numéro de téléphone est obligatoire.';
@@ -99,7 +148,6 @@ export default function IdentiteScreen() {
     }
     return undefined;
   };
-
   const validerEmail = (val: string) => {
     const propre = val.trim();
     if (!propre) return 'L’adresse e-mail est obligatoire.';
@@ -108,31 +156,57 @@ export default function IdentiteScreen() {
     }
     return undefined;
   };
-
   const validerAdresse = (val: string) => (!val.trim() ? 'L’adresse est obligatoire.' : undefined);
+  const validerContactNom = (val: string) =>
+    !val.trim() ? 'Le nom de la personne à prévenir est obligatoire.' : undefined;
+  const validerContactTelephone = (val: string) =>
+    !val.trim() ? 'Le contact de la personne à prévenir est obligatoire.' : undefined;
+  // Compte bancaire : JAMAIS bloquant (règle 3) — aucune validation.
 
   const erreurNom = tentativeSoumission ? validerNom(identite.nom) : undefined;
   const erreurPrenom = tentativeSoumission ? validerPrenom(identite.prenom) : undefined;
   const erreurDate = tentativeSoumission ? validerDate(identite.date_naissance) : undefined;
+  const erreurLieuNaissance = tentativeSoumission
+    ? validerLieuNaissance(identite.lieu_naissance)
+    : undefined;
+  const erreurPseudonyme = tentativeSoumission ? validerPseudonyme(identite.pseudonyme) : undefined;
+  const erreurGroupe = tentativeSoumission ? validerGroupe(identite.groupe) : undefined;
+  const erreurProfession = tentativeSoumission ? validerProfession(identite.profession) : undefined;
   const erreurCin = tentativeSoumission ? validerCin(identite.cin) : undefined;
+  const erreurCinLieu = tentativeSoumission ? validerCinLieu(identite.cin_lieu_delivrance) : undefined;
+  const erreurCinDate = tentativeSoumission ? validerCinDate(identite.cin_date_delivrance) : undefined;
   const erreurTelephone = tentativeSoumission ? validerTelephone(identite.telephone) : undefined;
   const erreurEmail = tentativeSoumission ? validerEmail(identite.email) : undefined;
   const erreurAdresse = tentativeSoumission ? validerAdresse(identite.adresse) : undefined;
+  const erreurContactNom = tentativeSoumission
+    ? validerContactNom(identite.contact_urgence_nom)
+    : undefined;
+  const erreurContactTel = tentativeSoumission
+    ? validerContactTelephone(identite.contact_urgence_telephone)
+    : undefined;
 
   const verifierEtContinuer = useCallback(() => {
     setTentativeSoumission(true);
 
-    const errN = validerNom(identite.nom);
-    const errP = validerPrenom(identite.prenom);
-    const errD = validerDate(identite.date_naissance);
-    const errC = validerCin(identite.cin);
-    const errT = validerTelephone(identite.telephone);
-    const errE = validerEmail(identite.email);
-    const errA = validerAdresse(identite.adresse);
-
-    if (errN || errP || errD || errC || errT || errE || errA) {
-      return;
-    }
+    const t = {
+      nom: validerNom(identite.nom),
+      prenom: validerPrenom(identite.prenom),
+      date: validerDate(identite.date_naissance),
+      lieuNaissance: validerLieuNaissance(identite.lieu_naissance),
+      pseudonyme: validerPseudonyme(identite.pseudonyme),
+      groupe: validerGroupe(identite.groupe),
+      profession: validerProfession(identite.profession),
+      cin: validerCin(identite.cin),
+      cinLieu: validerCinLieu(identite.cin_lieu_delivrance),
+      cinDate: validerCinDate(identite.cin_date_delivrance),
+      tel: validerTelephone(identite.telephone),
+      email: validerEmail(identite.email),
+      adresse: validerAdresse(identite.adresse),
+      contactNom: validerContactNom(identite.contact_urgence_nom),
+      contactTel: validerContactTelephone(identite.contact_urgence_telephone),
+    };
+    const invalide = Object.values(t).some((v) => v !== undefined);
+    if (invalide) return;
 
     if (estMoinsDe15Ans) {
       router.push('/(adhesion)/refus-age');
@@ -191,6 +265,26 @@ export default function IdentiteScreen() {
           onChangeValeur={(val) => void mettreAJourIdentite({ prenom: val })}
         />
 
+        <TextField
+          libelle="Pseudonyme"
+          valeur={identite.pseudonyme}
+          placeholder="Ex. Dao Kanto"
+          aide="Obligatoire à toute adhésion, conservable entre catégories, aucune unicité imposée."
+          obligatoire
+          erreur={erreurPseudonyme}
+          onChangeValeur={(val) => void mettreAJourIdentite({ pseudonyme: val })}
+        />
+
+        <TextField
+          libelle="Groupe"
+          valeur={identite.groupe}
+          placeholder="Nom du groupe / collectif"
+          aide="Obligatoire ; à défaut de groupe, le pseudonyme tient lieu d’identification publique."
+          obligatoire
+          erreur={erreurGroupe}
+          onChangeValeur={(val) => void mettreAJourIdentite({ groupe: val })}
+        />
+
         <DateField
           mode="date"
           libelle="Date de naissance"
@@ -207,11 +301,29 @@ export default function IdentiteScreen() {
           erreur={erreurDate}
         />
 
+        <TextField
+          libelle="Lieu de naissance"
+          valeur={identite.lieu_naissance}
+          placeholder="Antananarivo"
+          obligatoire
+          erreur={erreurLieuNaissance}
+          onChangeValeur={(val) => void mettreAJourIdentite({ lieu_naissance: val })}
+        />
+
         {age !== null && !estMoinsDe15Ans ? (
           <Text className="text-sm font-semibold text-omda-textGray">
             {`Âge calculé : ${age} an${age > 1 ? 's' : ''}`}
           </Text>
         ) : null}
+
+        <TextField
+          libelle="Profession"
+          valeur={identite.profession}
+          placeholder="Auteur-compositeur, enseignant, …"
+          obligatoire
+          erreur={erreurProfession}
+          onChangeValeur={(val) => void mettreAJourIdentite({ profession: val })}
+        />
 
         <TextField
           libelle="Numéro de CIN"
@@ -223,6 +335,27 @@ export default function IdentiteScreen() {
           obligatoire
           erreur={erreurCin}
           onChangeValeur={(val) => void mettreAJourIdentite({ cin: val.replace(/\s+/g, '') })}
+        />
+
+        <TextField
+          libelle="Lieu de délivrance de la CIN"
+          valeur={identite.cin_lieu_delivrance}
+          placeholder="Antananarivo"
+          obligatoire
+          erreur={erreurCinLieu}
+          onChangeValeur={(val) => void mettreAJourIdentite({ cin_lieu_delivrance: val })}
+        />
+
+        <DateField
+          mode="date"
+          libelle="Date de délivrance de la CIN"
+          valeur={identite.cin_date_delivrance}
+          onChangeValeur={(val) => void mettreAJourIdentite({ cin_date_delivrance: val })}
+          placeholder="Choisir une date"
+          dateMin={DATE_MIN_NAISSANCE}
+          dateMax={aujourdhuiLocal()}
+          obligatoire
+          erreur={erreurCinDate}
         />
 
         <TextField
@@ -256,6 +389,62 @@ export default function IdentiteScreen() {
           erreur={erreurAdresse}
           onChangeValeur={(val) => void mettreAJourIdentite({ adresse: val })}
         />
+
+        {/* Ancien chef-lieu : SERVI par le service, juste après l'adresse. */}
+        <SelectField
+          libelle="Ancien chef-lieu de province"
+          valeur={identite.ancien_chef_lieu_province_id}
+          options={optionsLieux}
+          placeholder={erreurChargementLieux ?? 'Choisir un ancien chef-lieu'}
+          aide={
+            erreurChargementLieux ??
+            'Liste de référence servie par le service, jamais codée en dur.'
+          }
+          desactive={Boolean(erreurChargementLieux) || optionsLieux.length === 0}
+          onChangeValeur={(val) =>
+            void mettreAJourIdentite({ ancien_chef_lieu_province_id: val as string })
+          }
+        />
+
+        <TextField
+          libelle="Personne à prévenir — nom"
+          valeur={identite.contact_urgence_nom}
+          placeholder="Nom et prénoms"
+          obligatoire
+          erreur={erreurContactNom}
+          onChangeValeur={(val) => void mettreAJourIdentite({ contact_urgence_nom: val })}
+        />
+
+        <TextField
+          libelle="Personne à prévenir — contact"
+          valeur={identite.contact_urgence_telephone}
+          placeholder="+261 …"
+          clavier="phone-pad"
+          obligatoire
+          erreur={erreurContactTel}
+          onChangeValeur={(val) => void mettreAJourIdentite({ contact_urgence_telephone: val })}
+        />
+
+        {/* Compte bancaire FACULTATIF — jamais bloquant (règle 3). */}
+        <TextField
+          libelle="Compte bancaire (facultatif)"
+          valeur={identite.compte_bancaire}
+          placeholder="Bg / n° de compte"
+          aide="Facultatif : votre adhésion n’est jamais bloquée en l’absence de compte."
+          desactive={false}
+          onChangeValeur={(val) => void mettreAJourIdentite({ compte_bancaire: val })}
+        />
+
+        {/* Territoire OMDA : valeur FIXE affichée en lecture seule (règle 3). */}
+        <View className="rounded-xl border border-omda-borderGray bg-omda-warmGray px-4 py-3">
+          <Text className="text-sm font-semibold text-omda-black">
+            Territoire géré par l’OMDA
+          </Text>
+          <Text className="mt-1 text-base text-omda-black">{TERRITOIRE_OMDA_FIXE}</Text>
+          <Text className="mt-1 text-xs text-omda-textGray">
+            Valeur automatique, non modifiable (règle 3).
+          </Text>
+        </View>
       </View>
 
       <View className="mt-8 gap-3">
@@ -268,5 +457,3 @@ export default function IdentiteScreen() {
     </ScreenContainer>
   );
 }
-
-

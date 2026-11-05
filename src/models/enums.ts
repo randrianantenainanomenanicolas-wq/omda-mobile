@@ -166,3 +166,20 @@ export type TypeBulletin = (typeof TYPES_BULLETIN)[number];
 
 export const TYPES_LITTERAIRE = ['LIVRE', 'POEME'] as const;
 export type TypeLitteraire = (typeof TYPES_LITTERAIRE)[number];
+
+/* ------------------------------------------------------- engagement (règle 3) */
+
+/**
+ * Valeur fixe affichée en lecture seule dans la fiche d'adhésion (règle
+ * métier 3) : le territoire géré par l'OMDA n'est JAMAIS saisi ni modifiable
+ * dans l'application.
+ */
+export const TERRITOIRE_OMDA_FIXE = 'Madagascar et le monde entier';
+
+/**
+ * Ville par défaut du texte d'engagement malgache (règle 3) :
+ * « Natao teto Antananarivo, anio faha…… ». La ville est une donnée du
+ * texte de référence, pas un champ éditable ; le « lieu de l'engagement »
+ * saisi sur l'écran Engagement reste stocké séparément pour le PDF.
+ */
+export const LIEU_ENGAGEMENT_PAR_DEFAUT = 'Antananarivo';

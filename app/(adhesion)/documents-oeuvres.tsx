@@ -826,7 +826,7 @@ export default function DocumentsOeuvresScreen() {
     if (!dossierComplet) {
       return;
     }
-    router.push('/(adhesion)/recapitulatif');
+    router.push('/(adhesion)/engagement');
   }, [dossierComplet]);
 
   if (etat === 'chargement') {

@@ -1,4 +1,5 @@
 import type {
+  AncienChefLieuProvince,
   Categorie,
   DateISO,
   Documentation,
@@ -28,10 +29,12 @@ import type {
 
 /** UUID v4 fixes des fixtures (données reproductibles d'un lancement à l'autre). */
 export const IDS_TEST = {
-  categorie_artiste_auteur: '11111111-1111-4111-8111-111111111111',
-  categorie_ecrivain: '22222222-2222-4222-8222-222222222222',
-  categorie_musicien: '33333333-3333-4333-8333-333333333333',
-  categorie_arts_numeriques: '44444444-4444-4444-8444-444444444444',
+  categorie_musique: '33333333-3333-4333-8333-333333333333',
+  categorie_litteraire: '22222222-2222-4222-8222-222222222222',
+  categorie_dramatique: '55555555-5555-4555-8555-555555555555',
+  categorie_audiovisuel: '66666666-6666-4666-8666-666666666666',
+  categorie_figuratif: '11111111-1111-4111-8111-111111111111',
+  categorie_desactivee: '44444444-4444-4444-8444-444444444444',
   oeuvre_validee: 'a0000000-0000-4000-8000-000000000001',
   oeuvre_en_validation: 'a0000000-0000-4000-8000-000000000002',
   oeuvre_rejetee: 'a0000000-0000-4000-8000-000000000003',
@@ -39,35 +42,18 @@ export const IDS_TEST = {
 
 /* ----------------------------------------------------------- Référentiels */
 
-/** Catégories d'adhésion : 3 actives + 1 inactive (qui ne doit JAMAIS s'afficher). */
+/**
+ * Catégories d'adhésion : les 5 catégories canoniques OMDA dans l'ordre
+ * métier imposé (règle 1 : Musique → Littéraire → Dramatique → Audiovisuel →
+ * Figuratif), + une catégorie inactive pour vérifier qu'un élément désactivé
+ * n'est jamais proposé (règle « liste dynamique »).
+ */
 export const CATEGORIES_TEST: Categorie[] = [
   {
-    id: IDS_TEST.categorie_artiste_auteur,
-    code: 'ARTISTE_AUTEUR',
-    libelle: 'Artiste-auteur',
-    description: 'Œuvres originales, créations plastiques et visuelles.',
-    ordre: 5,
-    type_bulletin: 'FIGURATIF_PROVISOIRE',
-    actif: true,
-    created_at: '2026-01-05T06:00:00.000Z',
-    updated_at: '2026-01-05T06:00:00.000Z',
-  },
-  {
-    id: IDS_TEST.categorie_ecrivain,
-    code: 'ECRIVAIN',
-    libelle: 'Écrivain',
-    description: 'Romans, poésie, essais et textes dramatiques.',
-    ordre: 2,
-    type_bulletin: 'LITTERAIRE',
-    actif: true,
-    created_at: '2026-01-05T06:00:00.000Z',
-    updated_at: '2026-01-05T06:00:00.000Z',
-  },
-  {
-    id: IDS_TEST.categorie_musicien,
-    code: 'MUSICIEN',
-    libelle: 'Musicien',
-    description: 'Compositions, interprétations et arrangements.',
+    id: IDS_TEST.categorie_musique,
+    code: 'MUSIQUE',
+    libelle: 'Musique',
+    description: 'Oeuvres musicales : chansons, compositions, arrangements.',
     ordre: 1,
     type_bulletin: 'MUSIQUE_ACR',
     actif: true,
@@ -75,16 +61,75 @@ export const CATEGORIES_TEST: Categorie[] = [
     updated_at: '2026-01-05T06:00:00.000Z',
   },
   {
-    id: IDS_TEST.categorie_arts_numeriques,
-    code: 'ARTS_NUMERIQUES',
-    libelle: 'Arts numériques',
-    description: 'Catégorie désactivée : ne doit pas apparaître dans l’application.',
+    id: IDS_TEST.categorie_litteraire,
+    code: 'LITTERAIRE',
+    libelle: 'Littéraire',
+    description: 'Livres, poèmes, essais et textes littéraires.',
+    ordre: 2,
+    type_bulletin: 'LITTERAIRE',
+    actif: true,
+    created_at: '2026-01-05T06:00:00.000Z',
+    updated_at: '2026-01-05T06:00:00.000Z',
+  },
+  {
+    id: IDS_TEST.categorie_dramatique,
+    code: 'DRAMATIQUE',
+    libelle: 'Dramatique',
+    description: 'Pièces de théâtre, scénarios et œuvres dramatiques.',
+    ordre: 3,
+    type_bulletin: 'DRAMATIQUE',
+    actif: true,
+    created_at: '2026-01-05T06:00:00.000Z',
+    updated_at: '2026-01-05T06:00:00.000Z',
+  },
+  {
+    id: IDS_TEST.categorie_audiovisuel,
+    code: 'AUDIOVISUEL',
+    libelle: 'Audiovisuel',
+    description: 'Films, séries, animations et œuvres audiovisuelles.',
     ordre: 4,
+    type_bulletin: 'AUDIOVISUEL',
+    actif: true,
+    created_at: '2026-01-05T06:00:00.000Z',
+    updated_at: '2026-01-05T06:00:00.000Z',
+  },
+  {
+    id: IDS_TEST.categorie_figuratif,
+    code: 'FIGURATIF',
+    libelle: 'Figuratif',
+    description:
+      'Arts plastiques et visuels — formulaire provisoire « à confirmer » (règle 3).',
+    ordre: 5,
+    type_bulletin: 'FIGURATIF_PROVISOIRE',
+    actif: true,
+    created_at: '2026-01-05T06:00:00.000Z',
+    updated_at: '2026-01-05T06:00:00.000Z',
+  },
+  {
+    id: IDS_TEST.categorie_desactivee,
+    code: 'ARTS_NUMERIQUES',
+    libelle: 'Arts numériques (désactivée)',
+    description: 'Catégorie désactivée : ne doit pas apparaître dans l’application.',
+    ordre: 99,
     type_bulletin: 'AUDIOVISUEL',
     actif: false,
     created_at: '2026-01-05T06:00:00.000Z',
     updated_at: '2026-02-01T06:00:00.000Z',
   },
+];
+
+/**
+ * Référentiel des anciens chef-lieux de province (règle 3 : « liste de
+ * référence en base, juste après l’adresse ») — 6 valeurs correspondant aux
+ * anciennes provinces malgaches avant la réorganisation territoriale.
+ */
+export const ANCIENS_CHEF_LIEUX_TEST: AncienChefLieuProvince[] = [
+  { id: 'd0000000-0000-4000-8000-000000000001', libelle: 'Antananarivo', ordre: 1, actif: true, created_at: '2026-01-05T06:00:00.000Z', updated_at: '2026-01-05T06:00:00.000Z' },
+  { id: 'd0000000-0000-4000-8000-000000000002', libelle: 'Antsiranana', ordre: 2, actif: true, created_at: '2026-01-05T06:00:00.000Z', updated_at: '2026-01-05T06:00:00.000Z' },
+  { id: 'd0000000-0000-4000-8000-000000000003', libelle: 'Fianarantsoa', ordre: 3, actif: true, created_at: '2026-01-05T06:00:00.000Z', updated_at: '2026-01-05T06:00:00.000Z' },
+  { id: 'd0000000-0000-4000-8000-000000000004', libelle: 'Mahajanga', ordre: 4, actif: true, created_at: '2026-01-05T06:00:00.000Z', updated_at: '2026-01-05T06:00:00.000Z' },
+  { id: 'd0000000-0000-4000-8000-000000000005', libelle: 'Toamasina', ordre: 5, actif: true, created_at: '2026-01-05T06:00:00.000Z', updated_at: '2026-01-05T06:00:00.000Z' },
+  { id: 'd0000000-0000-4000-8000-000000000006', libelle: 'Toliara', ordre: 6, actif: true, created_at: '2026-01-05T06:00:00.000Z', updated_at: '2026-01-05T06:00:00.000Z' },
 ];
 
 /** Grille tarifaire (montants en Ariary entiers — jamais codés en dur dans l'UI). */
@@ -116,7 +161,7 @@ export const TARIFS_TEST: Tarif[] = [
   {
     id: 'c0000000-0000-4000-8000-000000000004',
     type_operation: 'ADHESION',
-    categorie_id: IDS_TEST.categorie_musicien,
+    categorie_id: IDS_TEST.categorie_musique,
     montant: 120000,
     devise: 'MGA',
     actif: true,
@@ -336,7 +381,7 @@ export const DOSSIERS_TEST: DossierTest[] = [
     numero_dossier: 'OMDA-2026-000001',
     code_suivi: 'K7X4-9B2Q',
     statut: 'VALIDEE',
-    categorie_id: IDS_TEST.categorie_artiste_auteur,
+    categorie_id: IDS_TEST.categorie_figuratif,
     motif_rejet: null,
     date_soumission: '2026-08-01T07:10:00.000Z',
     date_decision: '2026-08-04T06:30:00.000Z',
@@ -355,7 +400,7 @@ export const DOSSIERS_TEST: DossierTest[] = [
     numero_dossier: 'OMDA-2026-000002',
     code_suivi: 'M3P8-7T2W',
     statut: 'EN_COURS_DE_VERIFICATION',
-    categorie_id: IDS_TEST.categorie_ecrivain,
+    categorie_id: IDS_TEST.categorie_litteraire,
     motif_rejet: null,
     date_soumission: '2026-08-20T09:00:00.000Z',
     date_decision: null,
@@ -374,7 +419,7 @@ export const DOSSIERS_TEST: DossierTest[] = [
     numero_dossier: 'OMDA-2026-000003',
     code_suivi: 'R9F2-4H6K',
     statut: 'REJETEE',
-    categorie_id: IDS_TEST.categorie_musicien,
+    categorie_id: IDS_TEST.categorie_musique,
     motif_rejet:
       'La copie de la CIN est illisible. Merci de déposer une nouvelle pièce, puis de ' +
       'renvoyer votre dossier.',
@@ -395,7 +440,7 @@ export const DOSSIERS_TEST: DossierTest[] = [
     numero_dossier: 'OMDA-2026-000004',
     code_suivi: 'D5N7-1Q8Z',
     statut: 'ADHESION_TERMINEE',
-    categorie_id: IDS_TEST.categorie_artiste_auteur,
+    categorie_id: IDS_TEST.categorie_figuratif,
     motif_rejet: null,
     date_soumission: '2026-05-02T06:00:00.000Z',
     date_decision: '2026-05-06T06:00:00.000Z',
@@ -417,7 +462,7 @@ export const DOSSIERS_TEST: DossierTest[] = [
     numero_dossier: 'OMDA-2026-000005',
     code_suivi: 'B2V6-3L9X',
     statut: 'ENVOYEE',
-    categorie_id: IDS_TEST.categorie_ecrivain,
+    categorie_id: IDS_TEST.categorie_litteraire,
     motif_rejet: null,
     date_soumission: '2026-09-22T10:05:00.000Z',
     date_decision: null,
@@ -436,7 +481,7 @@ export const DOSSIERS_TEST: DossierTest[] = [
     numero_dossier: 'OMDA-2026-000006',
     code_suivi: 'T4C1-8M5J',
     statut: 'BROUILLON',
-    categorie_id: IDS_TEST.categorie_musicien,
+    categorie_id: IDS_TEST.categorie_musique,
     motif_rejet: null,
     date_soumission: null,
     date_decision: null,
@@ -455,7 +500,7 @@ export const DOSSIERS_TEST: DossierTest[] = [
     numero_dossier: 'OMDA-2026-000007',
     code_suivi: 'P6L3-2S7D',
     statut: 'BROUILLON',
-    categorie_id: IDS_TEST.categorie_artiste_auteur,
+    categorie_id: IDS_TEST.categorie_figuratif,
     motif_rejet: null,
     date_soumission: null,
     date_decision: null,
@@ -474,7 +519,7 @@ export const DOSSIERS_TEST: DossierTest[] = [
     numero_dossier: 'OMDA-2026-000008',
     code_suivi: 'V4J9-6W3N',
     statut: 'VALIDEE',
-    categorie_id: IDS_TEST.categorie_musicien,
+    categorie_id: IDS_TEST.categorie_musique,
     motif_rejet: null,
     date_soumission: '2026-09-10T06:20:00.000Z',
     date_decision: '2026-09-13T06:00:00.000Z',

@@ -21,15 +21,58 @@ const CLE_STORAGE_ADHESION_DRAFT = 'omda_adhesion_draft_v1';
 /**
  * Données d'identité du candidat dans le brouillon.
  * Tolère des champs vides pendant la saisie progressive.
+ *
+ * Champs alignés sur la fiche d'adhésion (règle 3, docs/FORMULAIRES.md §1) :
+ * - identité civile : nom, prénom, date + lieu de naissance, profession ;
+ * - pseudonyme (règle 4 : obligatoire, NON unique, conservable) et groupe
+ *   (règle 3 : obligatoire, le pseudonyme peut le remplacer à l'affichage) ;
+ * - CIN : numéro + lieu et date de délivrance ;
+ * - coordonnées : téléphone, e-mail, adresse ;
+ * - ancien chef-lieu de province : id de la liste de référence (règle 3,
+ *   « juste après l'adresse »), jamais codé en dur dans l'écran ;
+ * - personne à prévenir (nom + contact) ;
+ * - compte bancaire : FACULTATIF, jamais bloquant ;
+ * - le territoire OMDA n'est PAS une donnée du brouillon : il est fixé par la
+ *   règle et affiché en lecture seule à partir de `TERRITOIRE_OMDA_FIXE` ;
+ * - le « lieu de réception du droit » n'est PAS dans l'app (règle 3).
  */
 export type IdentiteDraft = {
   nom: string;
   prenom: string;
   date_naissance: DateISO | '';
+  lieu_naissance: string;
+  pseudonyme: string;
+  groupe: string;
+  profession: string;
   cin: string;
+  cin_lieu_delivrance: string;
+  /** Format `AAAA-MM-JJ` sélectionné via DateField (mode date). */
+  cin_date_delivrance: DateISO | '';
   telephone: string;
   email: string;
   adresse: string;
+  ancien_chef_lieu_province_id: UUID | '';
+  contact_urgence_nom: string;
+  contact_urgence_telephone: string;
+  /** FACULTATIF : jamais bloquant (règle 3). Donnée sensible : jamais journalisée. */
+  compte_bancaire: string;
+};
+
+/**
+ * Engagement sur l'honneur (règle 3) : les 4 valeurs sont stockées dans le
+ * brouillon local et reprises dans le PDF récapitulatif. La ville « Antananarivo »
+ * reste EN DUR dans le texte servi par le service : le champ `lieu` ci-dessous
+ * n'est PAS réinjecté dans le texte, il n'est utilisé que pour le PDF et la base.
+ */
+export type EngagementDraft = {
+  /** Case « Déclaration sur l'honneur » cochée (acceptation). */
+  accepte: boolean;
+  /** Mention « voavaky sy ankatoavina » SAISIE par l'auteur (règle 3). */
+  mention_saisie: string;
+  /** Lieu de l'engagement, saisi sur l'écran (distinct de la ville du texte). */
+  lieu: string;
+  /** Date du jour au moment de l'acceptation (`AAAA-MM-JJ`), LECTURE SEULE. */
+  date_jour: DateISO | '';
 };
 
 /**
@@ -37,6 +80,7 @@ export type IdentiteDraft = {
  */
 export type AdhesionDraft = {
   identite: IdentiteDraft;
+  engagement: EngagementDraft;
   categorie_id: UUID | null;
   pieces: PieceEntree[];
   oeuvres: OeuvreAdhesionEntree[];
@@ -49,14 +93,32 @@ export const IDENTITE_VIDE: IdentiteDraft = {
   nom: '',
   prenom: '',
   date_naissance: '',
+  lieu_naissance: '',
+  pseudonyme: '',
+  groupe: '',
+  profession: '',
   cin: '',
+  cin_lieu_delivrance: '',
+  cin_date_delivrance: '',
   telephone: '+261',
   email: '',
   adresse: '',
+  ancien_chef_lieu_province_id: '',
+  contact_urgence_nom: '',
+  contact_urgence_telephone: '',
+  compte_bancaire: '',
+};
+
+export const ENGAGEMENT_VIDE: EngagementDraft = {
+  accepte: false,
+  mention_saisie: '',
+  lieu: '',
+  date_jour: '',
 };
 
 export const BROUILLON_INITIAL: AdhesionDraft = {
   identite: IDENTITE_VIDE,
+  engagement: ENGAGEMENT_VIDE,
   categorie_id: null,
   pieces: [],
   oeuvres: [],
@@ -91,6 +153,7 @@ export type AdhesionDraftContextType = {
   brouillon: AdhesionDraft;
   estCharge: boolean;
   mettreAJourIdentite: (partial: Partial<IdentiteDraft>) => Promise<void>;
+  mettreAJourEngagement: (partial: Partial<EngagementDraft>) => Promise<void>;
   definirCategorie: (categorieId: UUID) => Promise<void>;
   mettreAJourPieces: (pieces: PieceEntree[]) => Promise<void>;
   mettreAJourOeuvres: (oeuvres: OeuvreAdhesionEntree[]) => Promise<void>;
@@ -121,6 +184,10 @@ export function AdhesionDraftProvider({ children }: { children: ReactNode }) {
             identite: {
               ...precedent.identite,
               ...(parse.identite ?? {}),
+            },
+            engagement: {
+              ...precedent.engagement,
+              ...(parse.engagement ?? {}),
             },
           }));
         }
@@ -153,6 +220,24 @@ export function AdhesionDraftProvider({ children }: { children: ReactNode }) {
           ...precedent,
           identite: {
             ...precedent.identite,
+            ...partial,
+          },
+          derniere_mise_a_jour: new Date().toISOString(),
+        };
+        void persister(maj);
+        return maj;
+      });
+    },
+    [persister],
+  );
+
+  const mettreAJourEngagement = useCallback(
+    async (partial: Partial<EngagementDraft>) => {
+      setBrouillon((precedent) => {
+        const maj: AdhesionDraft = {
+          ...precedent,
+          engagement: {
+            ...precedent.engagement,
             ...partial,
           },
           derniere_mise_a_jour: new Date().toISOString(),
@@ -251,10 +336,18 @@ export function AdhesionDraftProvider({ children }: { children: ReactNode }) {
   const identiteEstValide = useMemo(() => {
     const i = brouillon.identite;
     if (!i.nom.trim() || !i.prenom.trim()) return false;
+    if (!i.pseudonyme.trim()) return false;
+    if (!i.groupe.trim()) return false;
     if (!i.cin.trim() || !/^\d{12}$/.test(i.cin.trim())) return false;
+    if (!i.cin_lieu_delivrance.trim()) return false;
+    if (!i.cin_date_delivrance) return false;
     if (!i.telephone.trim() || !i.telephone.startsWith('+261') || i.telephone.length < 13) return false;
     if (!i.email.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(i.email.trim())) return false;
     if (!i.adresse.trim()) return false;
+    if (!i.lieu_naissance.trim()) return false;
+    if (!i.profession.trim()) return false;
+    if (!i.contact_urgence_nom.trim()) return false;
+    if (!i.contact_urgence_telephone.trim()) return false;
     if (age === null || age < 15) return false;
     return true;
   }, [age, brouillon.identite]);
@@ -264,6 +357,7 @@ export function AdhesionDraftProvider({ children }: { children: ReactNode }) {
       brouillon,
       estCharge,
       mettreAJourIdentite,
+      mettreAJourEngagement,
       definirCategorie,
       mettreAJourPieces,
       mettreAJourOeuvres,
@@ -284,6 +378,7 @@ export function AdhesionDraftProvider({ children }: { children: ReactNode }) {
       estMoinsDe15Ans,
       identiteEstValide,
       mettreAJourIdentite,
+      mettreAJourEngagement,
       mettreAJourOeuvres,
       mettreAJourPieces,
       reinitialiserBrouillon,

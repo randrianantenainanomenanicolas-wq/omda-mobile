@@ -424,7 +424,7 @@ export default function RecapitulatifScreen() {
   if (etat === 'chargement') {
     return (
       <ScreenContainer titre="Récapitulatif" sousTitre="Demande d’adhésion">
-        <StepProgress etapeCourante={4} />
+        <StepProgress etapeCourante={5} />
         <LoadingState message="Chargement de votre dossier et des catégories d’adhésion…" />
       </ScreenContainer>
     );
@@ -433,7 +433,7 @@ export default function RecapitulatifScreen() {
   if (etat === 'erreur') {
     return (
       <ScreenContainer titre="Récapitulatif" sousTitre="Demande d’adhésion">
-        <StepProgress etapeCourante={4} />
+        <StepProgress etapeCourante={5} />
         <ErrorState
           titre="Récapitulatif indisponible"
           message={messageErreur}
@@ -446,7 +446,7 @@ export default function RecapitulatifScreen() {
   if (etat === 'vide') {
     return (
       <ScreenContainer titre="Récapitulatif" sousTitre="Demande d’adhésion">
-        <StepProgress etapeCourante={4} />
+        <StepProgress etapeCourante={5} />
         <EmptyState
           titre="Aucune demande en cours"
           message="Votre demande d’adhésion est vide : commencez par vos informations d’identité, puis choisissez une catégorie et joignez vos pièces."
@@ -459,7 +459,7 @@ export default function RecapitulatifScreen() {
 
   return (
     <ScreenContainer titre="Récapitulatif" sousTitre="Demande d’adhésion">
-      <StepProgress etapeCourante={4} />
+      <StepProgress etapeCourante={5} />
 
       <Text className="text-base text-omda-textGray">
         Vérifiez les informations ci-dessous. Chaque section peut être modifiée jusqu’à l’envoi :

@@ -1,4 +1,5 @@
 import type {
+  AncienChefLieuProvince,
   Categorie,
   Documentation,
   OperateurMobileMoney,
@@ -9,9 +10,11 @@ import type {
   EstimationMontantEntree,
   ListerTarifsEntree,
   PublicContentService,
+  TexteEngagementEntree,
 } from '../contracts';
 import { ok, type Result } from '../contracts';
 import {
+  ANCIENS_CHEF_LIEUX_TEST,
   CATEGORIES_TEST,
   DOCUMENTATION_TEST,
   MENTION_ESTIMATION,
@@ -19,6 +22,7 @@ import {
   tarifApplique,
 } from './donneesTestMock';
 import { CODES_MOCK, operateursActifs, preparerAppelMock, refusMock } from './etatMock';
+import { rendreTexteEngagement } from './texteEngagement';
 
 /**
  * `PublicContentService` simulé (contenus publics du visiteur).
@@ -59,16 +63,57 @@ export class MockPublicContentService implements PublicContentService {
     return ok(article);
   }
 
-  /** Catégories actives uniquement (la catégorie désactivée est absente). */
+  /**
+   * Catégories ACTIVES proposables à l'adhésion, triées dans l'ordre métier
+   * imposé par `ordre` (règle 1 : Musique → Littéraire → Dramatique →
+   * Audiovisuel → Figuratif), JAMAIS alphabétiquement.
+   */
   async listerCategories(): Promise<Result<Categorie[]>> {
     const panne = await preparerAppelMock();
     if (panne) {
       return panne;
     }
-    const categories = CATEGORIES_TEST.filter((categorie) => categorie.actif).sort((a, b) =>
-      a.libelle.localeCompare(b.libelle),
+    const categories = CATEGORIES_TEST.filter((categorie) => categorie.actif).sort(
+      (a, b) => a.ordre - b.ordre,
     );
     return ok(categories);
+  }
+
+  /**
+   * Anciens chef-lieux de province ACTIFS (règle 3 : liste de référence en
+   * base, jamais codée dans l'écran), triés par `ordre`.
+   */
+  async listerAnciensChefLieux(): Promise<Result<AncienChefLieuProvince[]>> {
+    const panne = await preparerAppelMock();
+    if (panne) {
+      return panne;
+    }
+    const lieux = ANCIENS_CHEF_LIEUX_TEST.filter((item) => item.actif).sort(
+      (a, b) => a.ordre - b.ordre,
+    );
+    return ok(lieux);
+  }
+
+  /**
+   * Texte d'engagement malgache servi PAR LE SERVICE avec ses 3 variables
+   * remplies (règle 3 + demande explicite de l'étape 29) : le reste du texte
+   * est recopié tel quel depuis `docs/texte-engagement-malgache.md`, sans
+   * reformulation. Les 3 blancs remplacés sont :
+   * - « Izaho …… » → `nom_prenoms` ;
+   * - « antokon'ny ……… » → `categorie` ;
+   * - « anio faha…………………… » → `date_du_jour` (JJ/MM/AAAA, au moment de
+   *   l'acceptation).
+   * La ville « Antananarivo » reste en dur dans le texte source : le « lieu
+   * de l'engagement » saisi sur l'écran est stocké séparément pour le PDF.
+   */
+  async obtenirTexteEngagement(
+    entree: TexteEngagementEntree,
+  ): Promise<Result<{ texte: string }>> {
+    const panne = await preparerAppelMock();
+    if (panne) {
+      return panne;
+    }
+    return ok({ texte: rendreTexteEngagement(entree) });
   }
 
   /** Grille tarifaire active, filtrable par opération et par catégorie. */

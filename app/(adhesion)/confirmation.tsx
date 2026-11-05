@@ -281,7 +281,7 @@ export default function ConfirmationScreen() {
   if (etat === 'chargement') {
     return (
       <ScreenContainer titre="Demande envoyée" afficherRetour={false}>
-        <StepProgress etapeCourante={5} />
+        <StepProgress etapeCourante={6} />
         <LoadingState message="Chargement des informations de votre demande…" />
       </ScreenContainer>
     );
@@ -290,7 +290,7 @@ export default function ConfirmationScreen() {
   if (etat === 'erreur') {
     return (
       <ScreenContainer titre="Demande envoyée" afficherRetour={false}>
-        <StepProgress etapeCourante={5} />
+        <StepProgress etapeCourante={6} />
         <ErrorState
           titre="Informations indisponibles"
           message={messageErreur}
@@ -303,7 +303,7 @@ export default function ConfirmationScreen() {
   if (etat === 'vide' || !informations) {
     return (
       <ScreenContainer titre="Demande envoyée" afficherRetour={false}>
-        <StepProgress etapeCourante={5} />
+        <StepProgress etapeCourante={6} />
         <EmptyState
           titre="Aucune demande à afficher"
           message="Cet écran présente les informations d’une demande d’adhésion envoyée depuis ce téléphone. Envoyez votre demande pour obtenir un numéro de dossier et un code de suivi."
@@ -328,7 +328,7 @@ export default function ConfirmationScreen() {
 
   return (
     <ScreenContainer titre="Demande envoyée" afficherRetour={false}>
-      <StepProgress etapeCourante={5} />
+      <StepProgress etapeCourante={6} />
 
       {/* Succès confirmé par le service (statut renvoyé par l'envoi). */}
       <InfoBanner

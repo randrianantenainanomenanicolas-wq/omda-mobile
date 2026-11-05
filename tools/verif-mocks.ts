@@ -14,8 +14,10 @@ import {
 } from '../src/services/mocks';
 
 /**
- * Vérification d'exécution des mocks (smoke test) : 111 contrôles sur les 4 mocks
- * + fixtures. Lancer avec `npx --yes tsx tools/verif-mocks.ts` — sortie attendue :
+ * Vérification d'exécution des mocks (smoke test) : contrôles sur les 4 mocks
+ * + fixtures (catégories dans l'ordre métier, anciens chef-lieux, texte
+ * d'engagement servi avec 3 variables substituées). Lancer avec
+ * `npx --yes tsx tools/verif-mocks.ts` — sortie attendue :
  * `TOUS LES CONTROLES SONT PASSES`.
  */
 
@@ -45,8 +47,40 @@ async function principal(): Promise<void> {
 
   const categories = await mockPublicContentService.listerCategories();
   verifier(
-    'catégorie désactivée absente (3 catégories actives)',
-    categories.ok && categories.valeur.length === 3,
+    'catégories actives : 5 (désactivée absente de la liste)',
+    categories.ok && categories.valeur.length === 5,
+  );
+  verifier(
+    'catégories triées dans l’ordre métier imposé (règle 1 : Musique → Littéraire → Dramatique → Audiovisuel → Figuratif)',
+    categories.ok &&
+      categories.valeur.map((c) => c.code).join(',') ===
+        'MUSIQUE,LITTERAIRE,DRAMATIQUE,AUDIOVISUEL,FIGURATIF',
+    categories.ok ? categories.valeur.map((c) => c.code).join(',') : 'n/a',
+  );
+
+  const chefLieux = await mockPublicContentService.listerAnciensChefLieux();
+  verifier(
+    'anciens chef-lieux ACTIFS : 6, triés par ordre (règle 3)',
+    chefLieux.ok &&
+      chefLieux.valeur.length === 6 &&
+      chefLieux.valeur.every((lieu) => lieu.actif) &&
+      chefLieux.valeur[0].libelle === 'Antananarivo' &&
+      chefLieux.valeur[5].libelle === 'Toliara',
+  );
+
+  const engagementRes = await mockPublicContentService.obtenirTexteEngagement({
+    nom_prenoms: 'RAKOTO Jean',
+    categorie: 'Musique',
+    date_du_jour: '05/11/2026',
+  });
+  verifier(
+    'texte d’engagement servi : 3 variables substituées, reste inchangé',
+    engagementRes.ok &&
+      engagementRes.valeur.texte.includes('Izaho RAKOTO Jean') &&
+      engagementRes.valeur.texte.includes("antokon'ny Musique") &&
+      engagementRes.valeur.texte.includes('anio faha05/11/2026') &&
+      !engagementRes.valeur.texte.includes('{{') &&
+      engagementRes.valeur.texte.includes('Natao teto Antananarivo'),
   );
 
   const estimation = await mockPublicContentService.estimerMontant({
