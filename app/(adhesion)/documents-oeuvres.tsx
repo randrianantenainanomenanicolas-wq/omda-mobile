@@ -20,10 +20,14 @@ import {
 } from '../../src/components/ui';
 import { useAdhesionDraft, type AdhesionDraft } from '../../src/context/AdhesionDraftContext';
 import {
+  PIECES_IDENTITE,
   TAILLE_MAX_FICHIER_MO,
   TAILLE_MAX_FICHIER_OCTETS,
   TYPES_MIME_ATTESTATION,
   TYPES_MIME_AUTORISES,
+  BULLETIN_VIDE,
+  bulletinEstComplet,
+  pieceImportationDepuisType,
   type BucketStockage,
   type Categorie,
   type TypeMime,
@@ -42,6 +46,7 @@ import {
   AIDE_ATTESTATION_FORMATS,
   MESSAGE_ATTESTATION_FORMAT_INVALIDE,
   compresserSiImage,
+  empreinteFichier,
   isAllowedAttestationMime,
   natureDepuisPiece,
   renommerFichier,
@@ -76,33 +81,17 @@ type ExigencePiece = {
   icone: NomIcone;
 };
 
-/** Pièces obligatoires du dossier d'adhésion (écran J). */
-const PIECES_OBLIGATOIRES: ExigencePiece[] = [
-  {
-    type: 'PHOTO',
-    libelle: 'Photo d’identité',
-    aide: 'Portrait récent et net, JPEG ou PNG.',
-    icone: 'camera',
-  },
-  {
-    type: 'CIN',
-    libelle: 'CIN légalisée',
-    aide: 'Copie légalisée recto-verso (JPEG, PNG ou PDF).',
-    icone: 'id-card',
-  },
-  {
-    type: 'ACTE_NAISSANCE',
-    libelle: 'Acte de naissance',
-    aide: 'Extrait récent (JPEG, PNG ou PDF).',
-    icone: 'file-lines',
-  },
-  {
-    type: 'CERTIFICAT_RESIDENCE',
-    libelle: 'Certificat de résidence',
-    aide: 'Certificat de moins de 3 mois (JPEG, PNG ou PDF).',
-    icone: 'house',
-  },
-];
+/**
+ * Pièces d'identité exigées : ordre, libellés, aides et icônes proviennent de
+ * la SOURCE UNIQUE `PIECES_IDENTITE` (src/models/importation.ts, règle 11).
+ * Rien n'est codé en dur dans l'écran.
+ */
+const PIECES_IDENTITE_CONFIG: ExigencePiece[] = PIECES_IDENTITE.map((piece) => ({
+  type: piece.type,
+  libelle: piece.libelle,
+  aide: piece.aide,
+  icone: piece.icone as NomIcone,
+}));
 
 /** Pièce supplémentaire exigée pour les candidats de 15 à 17 ans (règle métier 7). */
 const PIECE_AUTORISATION_PARENTALE: ExigencePiece = {
@@ -358,43 +347,111 @@ function signatureOeuvres(oeuvres: OeuvreAdhesionEntree[]): string {
   );
 }
 
-let compteurOeuvres = 0;
+let compteurCle = 0;
 
-/** Clé locale stable pour une ligne d'œuvre. */
-function nouvelleCleOeuvre(): string {
-  compteurOeuvres += 1;
-  return `oeuvre-${compteurOeuvres}`;
+/** Clé locale unique et stable pour une ligne d'œuvre (index du bulletin). */
+function cleUnique(): string {
+  compteurCle += 1;
+  return `oeuvre-${compteurCle}`;
 }
 
 /** Ligne d'œuvre vide : titre, fichier et attestation à fournir. */
-function oeuvreVide(): OeuvreEnCours {
+function oeuvreVide(cle: string): OeuvreEnCours {
   return {
-    cle: nouvelleCleOeuvre(),
+    cle,
     titre: '',
     fichier: ENVOI_VIDE,
     attestation: ENVOI_VIDE,
   };
 }
 
-/** Reprise des œuvres du brouillon, complétée jusqu'au minimum exigé. */
+/**
+ * Reprise des œuvres du brouillon, complétée jusqu'au minimum exigé.
+ * La clé locale (`cle_locale`) est conservée pour retrouver le bulletin de
+ * l'œuvre dans le brouillon persistant (`draft.bulletins[cle]`).
+ */
 function oeuvresInitiales(oeuvres: OeuvreAdhesionEntree[]): OeuvreEnCours[] {
   const lignes: OeuvreEnCours[] = oeuvres.map((oeuvre) => ({
-    cle: nouvelleCleOeuvre(),
+    cle: oeuvre.cle_locale ?? cleUnique(),
     titre: oeuvre.titre,
     fichier: envoiDepuisDepot(oeuvre.fichier),
     attestation: envoiDepuisDepot(oeuvre.attestations[0]),
   }));
 
   while (lignes.length < NOMBRE_MINIMUM_OEUVRES) {
-    lignes.push(oeuvreVide());
+    lignes.push(oeuvreVide(cleUnique()));
   }
 
   return lignes;
 }
 
+/**
+ * Carte des empreintes locales des fichiers retenus (contrôle anti-doublon du
+ * selfie, règle 5). On PART de la carte déjà persistée (`base`) pour ne pas
+ * écraser les empreintes prises lors d'une visite précédente : l'URI d'origine
+ * n'existe que le temps où le fichier est retenu à l'écran (`selection`).
+ * - envoi avec `selection` → empreinte (re)calculée à sa clé ;
+ * - envoi vidé et absent du brouillon → clé supprimée (pièce retirée) ;
+ * - sinon → valeur de `base` conservée (pièce déjà importée, non retouchée).
+ */
+function construireEmpreintes(
+  exigences: ExigencePiece[],
+  envoisPieces: Partial<Record<TypePiece, EnvoiFichier>>,
+  oeuvres: OeuvreEnCours[],
+  piecesBrouillon: PieceEntree[],
+  base: Record<string, string>,
+): Record<string, string> {
+  const carte: Record<string, string> = { ...base };
+  const typesEnBrouillon = new Set(piecesBrouillon.map((piece) => piece.type));
+
+  for (const exigence of exigences) {
+    const cle = exigence.type;
+    const envoi = envoisPieces[exigence.type] ?? ENVOI_VIDE;
+    if (envoi.selection) {
+      carte[cle] = empreinteFichier({
+        uri: envoi.selection.uri,
+        taille_octets: envoi.selection.taille_octets,
+      });
+    } else if (envoi.statut === 'vide' && !typesEnBrouillon.has(exigence.type)) {
+      delete carte[cle];
+    }
+  }
+
+  for (const oeuvre of oeuvres) {
+    const cleFichier = `${oeuvre.cle}#oeuvre`;
+    if (oeuvre.fichier.selection) {
+      carte[cleFichier] = empreinteFichier({
+        uri: oeuvre.fichier.selection.uri,
+        taille_octets: oeuvre.fichier.selection.taille_octets,
+      });
+    } else if (oeuvre.fichier.statut === 'vide') {
+      delete carte[cleFichier];
+    }
+
+    const cleAttestation = `${oeuvre.cle}#attestation`;
+    if (oeuvre.attestation.selection) {
+      carte[cleAttestation] = empreinteFichier({
+        uri: oeuvre.attestation.selection.uri,
+        taille_octets: oeuvre.attestation.selection.taille_octets,
+      });
+    } else if (oeuvre.attestation.statut === 'vide') {
+      delete carte[cleAttestation];
+    }
+  }
+
+  return carte;
+}
+
 export default function DocumentsOeuvresScreen() {
-  const { brouillon, estCharge, mettreAJourPieces, mettreAJourOeuvres, estMineur15A17 } =
-    useAdhesionDraft();
+  const {
+    brouillon,
+    estCharge,
+    mettreAJourPieces,
+    mettreAJourOeuvres,
+    effacerBulletin,
+    definirEmpreintesPieces,
+    estMineur15A17,
+  } = useAdhesionDraft();
 
   const [etat, setEtat] = useState<EtatEcran>('chargement');
   const [messageErreur, setMessageErreur] = useState('');
@@ -403,10 +460,12 @@ export default function DocumentsOeuvresScreen() {
   const [envoisPieces, setEnvoisPieces] = useState<Partial<Record<TypePiece, EnvoiFichier>>>({});
   const [oeuvres, setOeuvres] = useState<OeuvreEnCours[]>([]);
 
-  /** Pièces exigées : les 4 obligatoires + l'autorisation parentale si 15–17 ans. */
+  /** Pièces exigées : les 4 d'identité (source unique) + autorisation parentale si 15–17 ans. */
   const exigences = useMemo<ExigencePiece[]>(
     () =>
-      estMineur15A17 ? [...PIECES_OBLIGATOIRES, PIECE_AUTORISATION_PARENTALE] : PIECES_OBLIGATOIRES,
+      estMineur15A17
+        ? [...PIECES_IDENTITE_CONFIG, PIECE_AUTORISATION_PARENTALE]
+        : PIECES_IDENTITE_CONFIG,
     [estMineur15A17],
   );
 
@@ -498,10 +557,12 @@ export default function DocumentsOeuvresScreen() {
         annee: null,
         fichier: oeuvre.fichier.depose,
         attestations,
+        cle_locale: oeuvre.cle,
+        bulletin: brouillon.bulletins[oeuvre.cle] ?? null,
       });
     }
     return liste;
-  }, [categorieRetenue, oeuvres]);
+  }, [brouillon.bulletins, categorieRetenue, oeuvres]);
 
   const signaturePiecesCourante = signaturePieces(piecesCompletes);
   const signaturePiecesBrouillon = signaturePieces(brouillon.pieces);
@@ -535,6 +596,24 @@ export default function DocumentsOeuvresScreen() {
     signatureOeuvresBrouillon,
     signatureOeuvresCourante,
   ]);
+
+  /**
+   * Sauvegarde des empreintes locales (contrôle anti-doublon du selfie).
+   * `definirEmpreintesPieces` ignore une carte identique : pas de boucle.
+   */
+  useEffect(() => {
+    if (etat !== 'contenu') {
+      return;
+    }
+    const carte = construireEmpreintes(
+      exigences,
+      envoisPieces,
+      oeuvres,
+      brouillon.pieces,
+      brouillon.empreintes_pieces,
+    );
+    void definirEmpreintesPieces(carte);
+  }, [brouillon.empreintes_pieces, brouillon.pieces, envoisPieces, oeuvres, etat, exigences, definirEmpreintesPieces]);
 
   /* ----------------------------------------------------------- Moteur d'envoi */
 
@@ -821,17 +900,22 @@ export default function DocumentsOeuvresScreen() {
   /* ------------------------------------------------------- Œuvres du dossier */
 
   const ajouterOeuvre = useCallback(() => {
-    setOeuvres((precedent) => [...precedent, oeuvreVide()]);
+    setOeuvres((precedent) => [...precedent, oeuvreVide(cleUnique())]);
   }, []);
 
   /** Retrait possible uniquement au-delà du minimum de 2 œuvres. */
-  const retirerOeuvre = useCallback((cle: string) => {
-    setOeuvres((precedent) =>
-      precedent.length <= NOMBRE_MINIMUM_OEUVRES
-        ? precedent
-        : precedent.filter((element) => element.cle !== cle),
-    );
-  }, []);
+  const retirerOeuvre = useCallback(
+    (cle: string) => {
+      setOeuvres((precedent) =>
+        precedent.length <= NOMBRE_MINIMUM_OEUVRES
+          ? precedent
+          : precedent.filter((element) => element.cle !== cle),
+      );
+      // Le bulletin de l'œuvre retirée ne doit pas rester orphelin.
+      void effacerBulletin(cle);
+    },
+    [effacerBulletin],
+  );
 
   const definirTitreOeuvre = useCallback((cle: string, titre: string) => {
     setOeuvres((precedent) =>
@@ -868,6 +952,9 @@ export default function DocumentsOeuvresScreen() {
       if (oeuvre.attestation.statut !== 'reussi') {
         liste.push(`${nom} : attestation de diffusion obligatoire.`);
       }
+      if (!bulletinEstComplet(brouillon.bulletins[oeuvre.cle] ?? BULLETIN_VIDE)) {
+        liste.push(`${nom} : bulletin de déclaration à compléter.`);
+      }
     });
 
     if (oeuvresCompletes.length < NOMBRE_MINIMUM_OEUVRES) {
@@ -879,7 +966,7 @@ export default function DocumentsOeuvresScreen() {
     }
 
     return liste;
-  }, [envoisPieces, exigences, oeuvres, oeuvresCompletes.length]);
+  }, [brouillon.bulletins, envoisPieces, exigences, oeuvres, oeuvresCompletes.length]);
 
   const dossierComplet = categorieRetenue !== null && manques.length === 0;
 
@@ -931,7 +1018,7 @@ export default function DocumentsOeuvresScreen() {
       <StepProgress etapeCourante={3} />
 
       <Text className="text-base text-omda-textGray">
-        {`Joignez les pièces de votre dossier puis au moins ${NOMBRE_MINIMUM_OEUVRES} œuvres, chacune accompagnée d’une attestation de diffusion. Chaque fichier est limité à ${TAILLE_MAX_FICHIER_MO} Mo.`}
+        {`Dans l'ordre : d'abord chaque œuvre (fichier, attestation de diffusion et bulletin de déclaration), puis les pièces d’identité. Chaque fichier est limité à ${TAILLE_MAX_FICHIER_MO} Mo.`}
       </Text>
 
       <View className="mt-4 rounded-2xl border border-omda-borderGray bg-omda-white p-4">
@@ -964,7 +1051,133 @@ export default function DocumentsOeuvresScreen() {
         </View>
       ) : null}
 
-      <Text className="mt-7 text-lg font-bold text-omda-black">1. Pièces justificatives</Text>
+      <Text className="mt-7 text-lg font-bold text-omda-black">1. Œuvres</Text>
+      <Text className="mt-1 text-sm text-omda-textGray">
+        {`${NOMBRE_MINIMUM_OEUVRES} œuvres minimum — pour chacune : fichier, attestation de diffusion et bulletin. Formats fichier : ${LIBELLE_FORMATS.oeuvres}.`}
+      </Text>
+
+      <View className="mt-3 gap-4">
+        {oeuvres.map((oeuvre, index) => {
+          const bulletin = brouillon.bulletins[oeuvre.cle] ?? BULLETIN_VIDE;
+          const bulletinFait = bulletinEstComplet(bulletin);
+          const confOeuvre = pieceImportationDepuisType('OEUVRE');
+          const confAttestation = pieceImportationDepuisType('ATTESTATION_DIFFUSION');
+          const confBulletin = pieceImportationDepuisType('BULLETIN');
+
+          return (
+            <View
+              key={oeuvre.cle}
+              className="rounded-2xl border-2 border-omda-borderGray bg-omda-white p-4"
+            >
+              <Text className="text-base font-bold text-omda-black">
+                {oeuvre.titre.trim() ? `Œuvre : ${oeuvre.titre.trim()}` : `Œuvre ${index + 1}`}
+              </Text>
+
+              <View className="mt-3">
+                <TextField
+                  libelle="Titre de l’œuvre"
+                  valeur={oeuvre.titre}
+                  placeholder="Ex. La varangue"
+                  obligatoire
+                  onChangeValeur={(valeur) => definirTitreOeuvre(oeuvre.cle, valeur)}
+                />
+              </View>
+
+              <View className="mt-3 gap-3">
+                <UploadTile
+                  libelle={confOeuvre.libelle}
+                  icone={confOeuvre.icone as NomIcone}
+                  obligatoire
+                  statut={oeuvre.fichier.statut}
+                  nomFichier={nomFichierAffiche(oeuvre.fichier)}
+                  progression={oeuvre.fichier.progression}
+                  message={messageEnvoi(oeuvre.fichier, confOeuvre.aide)}
+                  onSelectionner={() => void selectionner({ nature: 'oeuvre', cle: oeuvre.cle })}
+                  onReessayer={() => void reessayer({ nature: 'oeuvre', cle: oeuvre.cle })}
+                  onRemplacer={() => void remplacer({ nature: 'oeuvre', cle: oeuvre.cle })}
+                  onSupprimer={() => supprimer({ nature: 'oeuvre', cle: oeuvre.cle })}
+                />
+
+                <UploadTile
+                  libelle={confAttestation.libelle}
+                  icone={confAttestation.icone as NomIcone}
+                  obligatoire
+                  statut={oeuvre.attestation.statut}
+                  nomFichier={nomFichierAffiche(oeuvre.attestation)}
+                  progression={oeuvre.attestation.progression}
+                  message={messageEnvoi(oeuvre.attestation, AIDE_ATTESTATION_FORMATS)}
+                  onSelectionner={() => void selectionner({ nature: 'attestation', cle: oeuvre.cle })}
+                  onReessayer={() => void reessayer({ nature: 'attestation', cle: oeuvre.cle })}
+                  onRemplacer={() => void remplacer({ nature: 'attestation', cle: oeuvre.cle })}
+                  onSupprimer={() => supprimer({ nature: 'attestation', cle: oeuvre.cle })}
+                />
+
+                <View className="rounded-xl border border-omda-borderGray bg-omda-warmGray p-3">
+                  <View className="flex-row items-center">
+                    <Icone
+                      nom={confBulletin.icone as NomIcone}
+                      taille={18}
+                      classeCouleur="text-omda-textGray"
+                    />
+                    <Text className="ml-2 flex-1 text-sm font-semibold text-omda-black">
+                      {confBulletin.libelle}
+                    </Text>
+                    <Text
+                      className={`text-xs font-bold ${
+                        bulletinFait ? 'text-status-success' : 'text-status-pending'
+                      }`}
+                    >
+                      {bulletinFait ? 'Complété' : 'À compléter'}
+                    </Text>
+                  </View>
+                  <Text className="mt-1 text-xs text-omda-textGray">{confBulletin.aide}</Text>
+                  <View className="mt-3">
+                    <Button
+                      libelle={bulletinFait ? 'Modifier le bulletin' : 'Compléter le bulletin'}
+                      icone="file-pen"
+                      variante="secondary"
+                      pleineLargeur
+                      onPress={() =>
+                        router.push({
+                          pathname: '/(adhesion)/bulletin',
+                          params: {
+                            cle: oeuvre.cle,
+                            titre: oeuvre.titre.trim() || `Œuvre ${index + 1}`,
+                          },
+                        })
+                      }
+                    />
+                  </View>
+                </View>
+              </View>
+
+              {oeuvres.length > NOMBRE_MINIMUM_OEUVRES ? (
+                <View className="mt-4">
+                  <Button
+                    libelle="Retirer cette œuvre"
+                    icone="trash"
+                    variante="destructive"
+                    pleineLargeur
+                    onPress={() => retirerOeuvre(oeuvre.cle)}
+                  />
+                </View>
+              ) : null}
+            </View>
+          );
+        })}
+      </View>
+
+      <View className="mt-4">
+        <Button
+          libelle="Ajouter une œuvre"
+          icone="plus"
+          variante="secondary"
+          pleineLargeur
+          onPress={ajouterOeuvre}
+        />
+      </View>
+
+      <Text className="mt-8 text-lg font-bold text-omda-black">2. Pièces d’identité</Text>
       <Text className="mt-1 text-sm text-omda-textGray">
         {`Formats acceptés : ${LIBELLE_FORMATS.pieces}. Un fichier refusé peut être remplacé.`}
       </Text>
@@ -991,87 +1204,6 @@ export default function DocumentsOeuvresScreen() {
             />
           );
         })}
-      </View>
-
-      <Text className="mt-8 text-lg font-bold text-omda-black">2. Œuvres</Text>
-      <Text className="mt-1 text-sm text-omda-textGray">
-        {`${NOMBRE_MINIMUM_OEUVRES} œuvres minimum — 1 attestation par œuvre. Formats acceptés : ${LIBELLE_FORMATS.oeuvres}.`}
-      </Text>
-
-      <View className="mt-3 gap-4">
-        {oeuvres.map((oeuvre, index) => (
-          <View
-            key={oeuvre.cle}
-            className="rounded-2xl border border-omda-borderGray bg-omda-white p-4"
-          >
-            <Text className="text-base font-bold text-omda-black">{`Œuvre ${index + 1}`}</Text>
-
-            <View className="mt-3">
-              <TextField
-                libelle="Titre de l’œuvre"
-                valeur={oeuvre.titre}
-                placeholder="Ex. La varangue"
-                obligatoire
-                onChangeValeur={(valeur) => definirTitreOeuvre(oeuvre.cle, valeur)}
-              />
-            </View>
-
-            <View className="mt-3 gap-3">
-              <UploadTile
-                libelle="Fichier de l’œuvre"
-                icone="file-audio"
-                obligatoire
-                statut={oeuvre.fichier.statut}
-                nomFichier={nomFichierAffiche(oeuvre.fichier)}
-                progression={oeuvre.fichier.progression}
-                message={messageEnvoi(
-                  oeuvre.fichier,
-                  'Œuvre complète : texte, audio ou image.',
-                )}
-                onSelectionner={() => void selectionner({ nature: 'oeuvre', cle: oeuvre.cle })}
-                onReessayer={() => void reessayer({ nature: 'oeuvre', cle: oeuvre.cle })}
-                onRemplacer={() => void remplacer({ nature: 'oeuvre', cle: oeuvre.cle })}
-                onSupprimer={() => supprimer({ nature: 'oeuvre', cle: oeuvre.cle })}
-              />
-
-              <UploadTile
-                libelle="Attestation de diffusion"
-                icone="paperclip"
-                obligatoire
-                statut={oeuvre.attestation.statut}
-                nomFichier={nomFichierAffiche(oeuvre.attestation)}
-                progression={oeuvre.attestation.progression}
-                message={messageEnvoi(oeuvre.attestation, AIDE_ATTESTATION_FORMATS)}
-                onSelectionner={() => void selectionner({ nature: 'attestation', cle: oeuvre.cle })}
-                onReessayer={() => void reessayer({ nature: 'attestation', cle: oeuvre.cle })}
-                onRemplacer={() => void remplacer({ nature: 'attestation', cle: oeuvre.cle })}
-                onSupprimer={() => supprimer({ nature: 'attestation', cle: oeuvre.cle })}
-              />
-            </View>
-
-            {oeuvres.length > NOMBRE_MINIMUM_OEUVRES ? (
-              <View className="mt-4">
-                <Button
-                  libelle="Retirer cette œuvre"
-                  icone="trash"
-                  variante="destructive"
-                  pleineLargeur
-                  onPress={() => retirerOeuvre(oeuvre.cle)}
-                />
-              </View>
-            ) : null}
-          </View>
-        ))}
-      </View>
-
-      <View className="mt-4">
-        <Button
-          libelle="Ajouter une œuvre"
-          icone="plus"
-          variante="secondary"
-          pleineLargeur
-          onPress={ajouterOeuvre}
-        />
       </View>
 
       {manques.length > 0 ? (

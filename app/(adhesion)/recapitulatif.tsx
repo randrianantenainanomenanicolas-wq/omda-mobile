@@ -14,10 +14,13 @@ import {
   type NomIcone,
 } from '../../src/components/ui';
 import { useAdhesionDraft, type AdhesionDraft } from '../../src/context/AdhesionDraftContext';
-import type { Categorie, TypePiece } from '../../src/models';
-import type { ErreurApp } from '../../src/services/contracts';
-import { enregistrerDossierSoumis } from '../../src/services/local/historiqueDossiers';
-import { candidateApi } from '../../src/services/factory';
+import {
+  BULLETIN_VIDE,
+  PIECES_IDENTITE,
+  bulletinEstComplet,
+  type Categorie,
+  type TypePiece,
+} from '../../src/models';
 import { mockPublicContentService } from '../../src/services/mocks';
 
 type EtatEcran = 'chargement' | 'erreur' | 'vide' | 'contenu';
@@ -36,16 +39,14 @@ type ExigencePiece = {
 };
 
 /**
- * Pièces obligatoires contrôlées au récapitulatif : mêmes exigences que l'écran J
- * (`app/(adhesion)/documents-oeuvres.tsx`). Les valeurs viennent de l'ENUM
- * `TypePiece` : aucune pièce inventée.
+ * Pièces obligatoires contrôlées au récapitulatif : ordre et libellés issus de
+ * la SOURCE UNIQUE `PIECES_IDENTITE` (`src/models/importation.ts`, règle 11).
+ * Aucune pièce n'est codée en dur dans l'écran.
  */
-const PIECES_OBLIGATOIRES: ExigencePiece[] = [
-  { type: 'PHOTO', libelle: 'Photo d’identité' },
-  { type: 'CIN', libelle: 'CIN légalisée' },
-  { type: 'ACTE_NAISSANCE', libelle: 'Acte de naissance' },
-  { type: 'CERTIFICAT_RESIDENCE', libelle: 'Certificat de résidence' },
-];
+const PIECES_OBLIGATOIRES: ExigencePiece[] = PIECES_IDENTITE.map((piece) => ({
+  type: piece.type,
+  libelle: piece.libelle,
+}));
 
 /** Pièce supplémentaire exigée de 15 à 17 ans (règle métier 7). */
 const PIECE_AUTORISATION_PARENTALE: ExigencePiece = {
@@ -54,17 +55,6 @@ const PIECE_AUTORISATION_PARENTALE: ExigencePiece = {
 };
 
 /* ------------------------------------------------------------- Utilitaires */
-
-/** Message français affichable pour une erreur de la couche data. */
-function messageErreurEnvoi(erreur: ErreurApp): string {
-  if (erreur.type === 'metier') {
-    return erreur.message;
-  }
-  if (erreur.type === 'reseau') {
-    return 'Impossible de joindre le serveur. Vérifiez votre connexion Internet puis réessayez.';
-  }
-  return 'Le service est momentanément indisponible. Veuillez réessayer dans un instant.';
-}
 
 /** Date ISO (`AAAA-MM-JJ`) affichée en `JJ/MM/AAAA` ; renvoie la valeur brute si invalide. */
 function formaterDate(date: string): string {
@@ -165,41 +155,26 @@ function LigneControle({
 /* ------------------------------------------------------------------- Écran */
 
 /**
- * Étape 4 — Récapitulatif modifiable (écran K du cahier des charges).
+ * Étape 5 — Récapitulatif modifiable (écran K du cahier des charges).
  *
  * Navigation linéaire (sans menu) : chaque section propose « Modifier » et
  * renvoie à l'étape correspondante (1 identité, 2 catégorie, 3 documents/œuvres).
  *
- * ⚠️ Aucun paiement n'est demandé à l'envoi (règle métier 1) : le bouton
- * « Envoyer ma demande » est actif uniquement si le dossier est complet, et
- * aucune information de paiement n'est affichée ici.
+ * ⚠️ L'envoi n'est PLUS fait ici (ÉTAPE 29C) : le bouton « Continuer » mène à
+ * la vérification d'identité (étape 6, selfie). « Envoyer ma demande » est
+ * porté par cet écran distinct et n'est accessible qu'après un selfie importé.
  *
- * Envoi (couche data, mêmes contrats que l'API Express) :
- * 1. `creerDemande` si le numéro de dossier et le code de suivi n'existent pas
- *    encore (le code de suivi n'est renvoyé en clair qu'une seule fois) ;
- * 2. `soumettreDemande` avec les pièces et œuvres confirmées ;
- * 3. historique local (`src/services/local/historiqueDossiers`) pour l'action
- *    « Sauvegarder » de l'écran L ;
- * 4. le brouillon `AdhesionDraft` (AsyncStorage) est effacé UNIQUEMENT après
- *    confirmation du service, puis l'écran L est affiché.
+ * Aucun paiement n'est demandé (règle métier 1) : aucune information de
+ * paiement n'est affichée ici.
  *
  * 4 états obligatoires : chargement, erreur (+ « Réessayer »), vide et contenu.
  */
 export default function RecapitulatifScreen() {
-  const {
-    brouillon,
-    estCharge,
-    estMineur15A17,
-    identiteEstValide,
-    definirIdentifiantsDossier,
-    reinitialiserBrouillon,
-  } = useAdhesionDraft();
+  const { brouillon, estCharge, estMineur15A17, identiteEstValide } = useAdhesionDraft();
 
   const [etat, setEtat] = useState<EtatEcran>('chargement');
   const [messageErreur, setMessageErreur] = useState('');
   const [categorieRetenue, setCategorieRetenue] = useState<Categorie | null>(null);
-  const [envoiEnCours, setEnvoiEnCours] = useState(false);
-  const [erreurEnvoi, setErreurEnvoi] = useState<string | null>(null);
 
   /** Pièces exigées : les 4 obligatoires + l'autorisation parentale si 15–17 ans. */
   const exigences = useMemo<ExigencePiece[]>(
@@ -255,16 +230,17 @@ export default function RecapitulatifScreen() {
     return index;
   }, [brouillon.pieces]);
 
-  /** Œuvres complètes : titre + fichier + au moins une attestation de diffusion. */
+  /** Œuvres complètes : titre + fichier + attestation + bulletin renseigné. */
   const oeuvresCompletes = useMemo(
     () =>
       brouillon.oeuvres.filter(
         (oeuvre) =>
           oeuvre.titre.trim().length > 0 &&
           oeuvre.fichier.chemin_stockage.length > 0 &&
-          oeuvre.attestations.length >= NOMBRE_MINIMUM_ATTESTATIONS,
+          oeuvre.attestations.length >= NOMBRE_MINIMUM_ATTESTATIONS &&
+          bulletinEstComplet(brouillon.bulletins[oeuvre.cle_locale ?? ''] ?? BULLETIN_VIDE),
       ),
-    [brouillon.oeuvres],
+    [brouillon.bulletins, brouillon.oeuvres],
   );
 
   /** Points manquants : affichés en clair et utilisés pour bloquer l'envoi. */
@@ -298,6 +274,9 @@ export default function RecapitulatifScreen() {
       if (oeuvre.attestations.length < NOMBRE_MINIMUM_ATTESTATIONS) {
         liste.push(`${nom} : attestation de diffusion obligatoire.`);
       }
+      if (!bulletinEstComplet(brouillon.bulletins[oeuvre.cle_locale ?? ''] ?? BULLETIN_VIDE)) {
+        liste.push(`${nom} : bulletin de déclaration à compléter.`);
+      }
     });
 
     if (oeuvresCompletes.length < NOMBRE_MINIMUM_OEUVRES) {
@@ -310,6 +289,7 @@ export default function RecapitulatifScreen() {
 
     return liste;
   }, [
+    brouillon.bulletins,
     brouillon.oeuvres,
     categorieRetenue,
     exigences,
@@ -320,104 +300,18 @@ export default function RecapitulatifScreen() {
 
   const dossierComplet = manques.length === 0;
 
-  /* ------------------------------------------------ Envoi de la demande */
+  /* ------------------------------------ Continuation vers la vérification */
 
   /**
-   * Envoie le dossier complet : aucun paiement n'est demandé à ce stade.
-   * Le brouillon local n'est effacé qu'après confirmation du service.
+   * Le récapitulatif n'envoie plus la demande (ÉTAPE 29C) : il mène à la
+   * vérification d'identité (étape 6), où le selfie débloquera l'envoi.
    */
-  const envoyer = useCallback(async () => {
-    if (!dossierComplet || envoiEnCours || !categorieRetenue) {
+  const continuer = useCallback(() => {
+    if (!dossierComplet) {
       return;
     }
-
-    setEnvoiEnCours(true);
-    setErreurEnvoi(null);
-
-    try {
-      // 1. Numéro de dossier et code de suivi : créés une seule fois, puis conservés.
-      let numeroDossier = brouillon.numero_dossier;
-      let codeSuivi = brouillon.code_suivi;
-
-      if (!numeroDossier || !codeSuivi) {
-        const creation = await candidateApi.creerDemande({
-          identite: {
-            nom: brouillon.identite.nom.trim(),
-            prenom: brouillon.identite.prenom.trim(),
-            date_naissance: brouillon.identite.date_naissance,
-            cin: brouillon.identite.cin.trim(),
-            telephone: brouillon.identite.telephone.trim(),
-            email: brouillon.identite.email.trim(),
-            adresse: brouillon.identite.adresse.trim(),
-          },
-          categorie_id: categorieRetenue.id,
-        });
-
-        if (!creation.ok) {
-          setErreurEnvoi(messageErreurEnvoi(creation.erreur));
-          return;
-        }
-
-        numeroDossier = creation.valeur.numero_dossier;
-        codeSuivi = creation.valeur.code_suivi;
-        await definirIdentifiantsDossier(numeroDossier, codeSuivi);
-      }
-
-      // 2. Envoi du dossier complet (statut ENVOYEE, délai indicatif, aucun paiement).
-      const envoi = await candidateApi.soumettreDemande({
-        numero_dossier: numeroDossier,
-        code_suivi: codeSuivi,
-        categorie_id: categorieRetenue.id,
-        pieces: brouillon.pieces,
-        oeuvres: brouillon.oeuvres,
-      });
-
-      if (!envoi.ok) {
-        setErreurEnvoi(messageErreurEnvoi(envoi.erreur));
-        return;
-      }
-
-      // 3. Historique local (l'échec d'écriture n'annule pas l'envoi confirmé).
-      const historique = await enregistrerDossierSoumis({
-        numero_dossier: envoi.valeur.numero_dossier,
-        code_suivi: envoi.valeur.code_suivi,
-        statut: envoi.valeur.statut,
-        date_soumission: envoi.valeur.date_soumission,
-        delai_indicatif_heures: envoi.valeur.delai_indicatif_heures,
-      });
-      if (!historique.ok) {
-        console.warn('[Recapitulatif] Historique local non enregistré :', historique.erreur.message);
-      }
-
-      // 4. Brouillon effacé seulement maintenant, puis affichage de l'écran L.
-      await reinitialiserBrouillon();
-
-      router.replace({
-        pathname: '/(adhesion)/confirmation',
-        params: {
-          numero_dossier: envoi.valeur.numero_dossier,
-          code_suivi: envoi.valeur.code_suivi,
-          statut: envoi.valeur.statut,
-          delai_indicatif_heures: String(envoi.valeur.delai_indicatif_heures),
-          date_soumission: envoi.valeur.date_soumission,
-        },
-      });
-    } catch (erreur) {
-      console.warn('[Recapitulatif] Envoi impossible :', erreur);
-      setErreurEnvoi(
-        'L’envoi de votre demande a échoué. Vérifiez votre connexion Internet puis réessayez.',
-      );
-    } finally {
-      setEnvoiEnCours(false);
-    }
-  }, [
-    brouillon,
-    categorieRetenue,
-    definirIdentifiantsDossier,
-    dossierComplet,
-    envoiEnCours,
-    reinitialiserBrouillon,
-  ]);
+    router.push('/(adhesion)/verif-identite');
+  }, [dossierComplet]);
 
   /* --------------------------------------------------------------- Rendu */
 
@@ -570,6 +464,15 @@ export default function RecapitulatifScreen() {
               }
               present={oeuvre.attestations.length >= NOMBRE_MINIMUM_ATTESTATIONS}
             />
+            <LigneControle
+              libelle="Bulletin de déclaration"
+              detail={
+                bulletinEstComplet(brouillon.bulletins[oeuvre.cle_locale ?? ''] ?? BULLETIN_VIDE)
+                  ? 'Complété'
+                  : null
+              }
+              present={bulletinEstComplet(brouillon.bulletins[oeuvre.cle_locale ?? ''] ?? BULLETIN_VIDE)}
+            />
           </View>
         ))}
       </Section>
@@ -580,7 +483,7 @@ export default function RecapitulatifScreen() {
           <InfoBanner
             variante="info"
             titre="Dossier complet"
-            message="Toutes les informations exigées sont présentes. Vous pouvez envoyer votre demande : aucun paiement n’est demandé à l’envoi."
+            message="Toutes les informations exigées sont présentes. Vous pouvez passer à la vérification d’identité : aucun paiement n’est demandé à ce stade."
           />
         </View>
       ) : (
@@ -595,36 +498,13 @@ export default function RecapitulatifScreen() {
         </View>
       )}
 
-      {/* Envoi en cours et erreur d'envoi */}
-      {envoiEnCours ? (
-        <View className="mt-4">
-          <InfoBanner
-            variante="pending"
-            message="Envoi de votre demande en cours… Ne fermez pas l’application."
-          />
-        </View>
-      ) : null}
-
-      {erreurEnvoi ? (
-        <View className="mt-4">
-          <InfoBanner
-            variante="error"
-            titre="Envoi impossible"
-            message={erreurEnvoi}
-            actionLibelle="Réessayer"
-            onAction={() => void envoyer()}
-          />
-        </View>
-      ) : null}
-
       <View className="mt-8 gap-3">
         <Button
-          libelle="Envoyer ma demande"
-          icone="paper-plane"
+          libelle="Continuer vers la vérification d’identité"
+          icone="shield-halved"
           pleineLargeur
           desactive={!dossierComplet}
-          chargement={envoiEnCours}
-          onPress={() => void envoyer()}
+          onPress={continuer}
         />
         <Button
           libelle="Retour aux documents et œuvres"

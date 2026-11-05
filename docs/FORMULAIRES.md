@@ -165,3 +165,34 @@ Champs présents dans les 4 fiches (musique, littéraire, dramatique, audiovisue
 ## 9. Fichier de référence — Texte d'engagement malgache
 
 Le texte d'engagement malgache de la fiche d'adhésion est recopié **EXACTEMENT** depuis `docs/formulaires/fiche-adhesion-musique.txt` (lignes 60-83) dans le fichier `docs/texte-engagement-malgache.md`, sans correction, traduction ni reformulation. Les passages mal extraits (coupures de ligne, caractères suspects) sont signalés tels quels dans ce fichier.
+
+## 10. Ordre d'importation des documents (parcours candidat)
+
+> Règle de référence : `docs/REGLES_METIER_V2.md` §11. **Tous les documents à importer sont obligatoires.** L'écran d'importation respecte strictement l'ordre ci-dessous ; types de pièces **et** ordre proviennent d'une **source unique** (`src/models/importation.ts`, dérivée de l'ENUM `TYPES_PIECE_CANDIDAT`) consommée à la fois par l'écran Documents, l'écran Vérification d'identité, les mocks et `tools/verif-mocks.ts`. Aucun libellé, aucune icône, aucun bucket n'est codé en dur dans un écran.
+
+| Position | Groupement | Pièce (`TypePiece`) | Libellé affiché | Bucket | Nature (renommage 29B) |
+|----------|-----------|---------------------|-----------------|--------|------------------------|
+| 1 | **Par œuvre** (bloc regroupé et visuellement distinct, portant le **titre de l'œuvre**) | `OEUVRE` | Fichier de l'œuvre | `oeuvres` | `OEUVRE` |
+| 1 | idem | `ATTESTATION_DIFFUSION` | Attestation de diffusion | `oeuvres` | `ATTESTATION_DIFFUSION` |
+| 1 | idem | `BULLETIN` | Bulletin de déclaration (rempli dans l'app) | — (formulaire natif, pas de fichier) | `BULLETIN` |
+| 2 | Pièce d'identité | `PHOTO` | Photo de l'auteur (claire et récente) | `pieces` | `PHOTO` |
+| 3 | Pièce d'identité | `CIN` | Photocopie de la CIN (copie légalisée) | `pieces` | `CIN` |
+| 4 | Pièce d'identité | `ACTE_NAISSANCE` | Acte de naissance | `pieces` | `ACTE_NAISSANCE` |
+| 5 | Pièce d'identité | `CERTIFICAT_RESIDENCE` | Certificat de résidence | `pieces` | `CERTIFICAT_RESIDENCE` |
+
+- **Bloc « par œuvre »** : chaque œuvre forme un bloc distinct qui affiche son **titre** et regroupe ses trois éléments (fichier, attestation, bulletin) pour éviter toute confusion entre les œuvres. Le **bulletin** porte un état **« à compléter » / « complété »** et un **accès direct au formulaire** (écran `app/(adhesion)/bulletin.tsx`, §11 ci-dessous et §2→§7). Une autorisation parentale s'ajoute pour les 15–17 ans (règle 7).
+- Chaque section indique son **état** : *manquant*, *envoi en cours*, *importé*, ou *erreur avec reprise* (via `UploadTile`). Les images passent par le traitement de l'**ÉTAPE 29B** (compression + renommage + contrôles de type/taille) ; PDF et MP3 ne sont pas retraités.
+- Le **selfie avec CIN n'est pas** dans cette liste : c'est l'étape finale et distincte décrite en §11.
+
+## 11. Vérification d'identité par selfie (dernière étape)
+
+> Règle de référence : `docs/REGLES_METIER_V2.md` §5. Écran dédié `app/(adhesion)/verif-identite.tsx`, **étape distincte et toute dernière**, juste avant l'envoi.
+
+- **Accès verrouillé** : l'écran n'est atteignable que lorsque **tous les formulaires sont complets** (identité valide, catégorie choisie, engagement accepté et saisi, **chaque bulletin complété**) **et toutes les pièces importées** (bloc œuvres complet + les 4 pièces d'identité). Sinon la vérification est **verrouillée** et affiche la **liste précise de ce qui manque**, chacun avec un **lien** vers l'écran/section concerné.
+- **Prise du selfie** : le candidat prend un selfie **à la caméra** (`expo-image-picker`, caméra) **ou importe une image** depuis la galerie, **en tenant sa CIN**. La **permission caméra est demandée au bon moment** (à l'appui sur « Prendre le selfie », jamais à l'ouverture de l'écran) ; un **message clair** explique le refus et la marche à suivre. La **consigne** (« tenez votre CIN, visage et carte visibles et lisibles ») est **affichée avant la prise**.
+- **Traitement** : le selfie suit l'**ÉTAPE 29B** (compression JPEG, renommage `Selfie avec CIN {nom} {prénom}`, clé de stockage sûre, contrôles type/taille).
+- **Contrôles locaux** : l'image est **refusée si trop petite pour être lisible** (`verifIdentite.ts`, seuils en pixels) et si son **empreinte est identique à celle d'une autre pièce** (même fichier que la CIN, etc.).
+- **Aucune reconnaissance faciale** : l'application ne compare aucun visage ; **l'agent OMDA examine la photo au back-office**, et **le texte de l'écran le dit explicitement**.
+- **Verrou d'envoi** : le bouton **« Envoyer ma demande » n'est accessible qu'après un selfie importé avec succès** et encore valide. **Le contrôle est aussi appliqué côté serveur** : `soumettreDemande` refuse (`SELFIE_REQUIS`) sans selfie.
+- **Réinvalidation** : si le candidat **modifie ensuite un formulaire ou une pièce**, le **selfie doit être refait** et le bouton redevient **inaccessible** (comparaison d'une **empreinte du dossier** capturée au moment du selfie, `signatureDossier`).
+- **4 états** obligatoires (chargement / erreur + reprise / verrouillé-manquants / prêt) et **reprise après échec** d'envoi **sans perdre le reste** du dossier.

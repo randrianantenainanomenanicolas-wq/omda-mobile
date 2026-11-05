@@ -5,3 +5,4 @@ export * from './nommageFichiers';
 export * from './compressionImage';
 export * from './validationCategorie';
 export * from './envoiRobuste';
+export * from './verifIdentite';

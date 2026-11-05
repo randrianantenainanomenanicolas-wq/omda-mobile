@@ -444,6 +444,8 @@ export type DossierMock = {
   identite: IdentiteCandidatEntree;
   pieces: PieceEntree[];
   oeuvres: OeuvreAdhesionEntree[];
+  /** Selfie de vérification d'identité (dernière pièce, règle 5, ÉTAPE 29C). */
+  selfie?: PieceEntree | null;
 };
 
 /** Dossiers préexistants (fixtures) et dossiers créés pendant la session. */

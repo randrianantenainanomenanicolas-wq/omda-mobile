@@ -2,7 +2,7 @@ import { Text, View } from 'react-native';
 
 import { Icone } from './Icone';
 
-export type EtapeAdhesionIndex = 1 | 2 | 3 | 4 | 5 | 6;
+export type EtapeAdhesionIndex = 1 | 2 | 3 | 4 | 5 | 6 | 7;
 
 export type DefinitionEtapeAdhesion = {
   index: EtapeAdhesionIndex;
@@ -16,21 +16,22 @@ export const ETAPES_ADHESION: DefinitionEtapeAdhesion[] = [
   { index: 3, titreCourt: 'Documents', titreComplet: 'Documents & œuvres' },
   { index: 4, titreCourt: 'Engagement', titreComplet: 'Engagement sur l’honneur' },
   { index: 5, titreCourt: 'Récapitulatif', titreComplet: 'Vérification du dossier' },
-  { index: 6, titreCourt: 'Confirmation', titreComplet: 'Envoi & confirmation' },
+  { index: 6, titreCourt: 'Vérification', titreComplet: 'Vérification d’identité (selfie)' },
+  { index: 7, titreCourt: 'Confirmation', titreComplet: 'Envoi & confirmation' },
 ];
 
 type PropsStepProgress = {
-  /** Étape en cours (1 à 6). */
+  /** Étape en cours (1 à 7). */
   etapeCourante: EtapeAdhesionIndex;
 };
 
 /**
- * Indicateur de progression du parcours d’adhésion (1 → 6).
+ * Indicateur de progression du parcours d’adhésion (1 → 7).
  *
  * Affiché en tête des écrans du tunnel pour donner une visibilité claire
  * sur l’état d’avancement :
  * 1. Identité → 2. Catégorie → 3. Documents & œuvres → 4. Engagement →
- * 5. Récapitulatif → 6. Confirmation
+ * 5. Récapitulatif → 6. Vérification d’identité → 7. Confirmation
  *
  * L’étape « Engagement » a été ajoutée à l’ÉTAPE 29 : le texte malgache est
  * servi par le service avec ses 3 variables, l’auteur saisit la mention, le
@@ -50,7 +51,7 @@ export function StepProgress({ etapeCourante }: PropsStepProgress) {
     <View
       className="mb-5 rounded-2xl border border-omda-borderGray bg-omda-white p-4"
       accessibilityRole="header"
-      accessibilityLabel={`Étape ${etapeCourante} sur 6 : ${etapeActive.titreComplet}`}
+      accessibilityLabel={`Étape ${etapeCourante} sur 7 : ${etapeActive.titreComplet}`}
     >
       {/* Barre de pastilles numérotées */}
       <View className="flex-row items-center justify-between">
@@ -96,7 +97,7 @@ export function StepProgress({ etapeCourante }: PropsStepProgress) {
       {/* Intitulé de l'étape courante */}
       <View className="mt-3 flex-row items-baseline justify-between">
         <Text className="text-xs font-semibold uppercase tracking-wider text-omda-textGray">
-          {`Étape ${etapeCourante} sur 6`}
+          {`Étape ${etapeCourante} sur 7`}
         </Text>
         <Text className="text-sm font-bold text-omda-black">{etapeActive.titreComplet}</Text>
       </View>

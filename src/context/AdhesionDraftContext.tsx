@@ -9,7 +9,7 @@ import {
   type ReactNode,
 } from 'react';
 
-import type { DateISO, UUID } from '../models';
+import type { BulletinDeclaration, DateISO, UUID } from '../models';
 import type {
   OeuvreAdhesionEntree,
   PieceEntree,
@@ -84,6 +84,31 @@ export type AdhesionDraft = {
   categorie_id: UUID | null;
   pieces: PieceEntree[];
   oeuvres: OeuvreAdhesionEntree[];
+  /**
+   * Bulletins de déclaration saisis dans l'app (ÉTAPE 29C), indexés par la clé
+   * locale stable de l'œuvre (`cle_locale`). Source de vérité du formulaire,
+   * conservée même si l'œuvre n'est pas encore complète (fichier manquant).
+   */
+  bulletins: Record<string, BulletinDeclaration>;
+  /**
+   * Empreintes locales des fichiers déjà retenus pour une autre pièce
+   * (ÉTAPE 29C, règle 5) : clé descriptive (type de pièce, ou `cle#nature`
+   * pour une œuvre/attestation), valeur = `empreinteFichier` du fichier choisi
+   * AVANT compression. Sert au contrôle local du selfie (refus du même fichier
+   * qu'une autre pièce). Le selfie n'y figure pas : il est contrôlé séparément.
+   */
+  empreintes_pieces: Record<string, string>;
+  /**
+   * Selfie de vérification d'identité (dernière pièce, règle 5). `null` tant
+   * que le candidat n'a pas importé un selfie valide.
+   */
+  selfie: PieceEntree | null;
+  /**
+   * Signature du dossier capturée AU MOMENT du selfie. Si le candidat modifie
+   * ensuite un formulaire ou une pièce, la signature recalculée diffère et le
+   * selfie est jugé à refaire (bouton d'envoi verrouillé à nouveau).
+   */
+  empreinte_dossier_au_selfie: string | null;
   numero_dossier: string | null;
   code_suivi: string | null;
   derniere_mise_a_jour: string;
@@ -122,6 +147,10 @@ export const BROUILLON_INITIAL: AdhesionDraft = {
   categorie_id: null,
   pieces: [],
   oeuvres: [],
+  bulletins: {},
+  empreintes_pieces: {},
+  selfie: null,
+  empreinte_dossier_au_selfie: null,
   numero_dossier: null,
   code_suivi: null,
   derniere_mise_a_jour: new Date().toISOString(),
@@ -157,7 +186,20 @@ export type AdhesionDraftContextType = {
   definirCategorie: (categorieId: UUID) => Promise<void>;
   mettreAJourPieces: (pieces: PieceEntree[]) => Promise<void>;
   mettreAJourOeuvres: (oeuvres: OeuvreAdhesionEntree[]) => Promise<void>;
+  /** Enregistre le bulletin d'une œuvre (clé locale stable). */
+  definirBulletin: (cle: string, bulletin: BulletinDeclaration) => Promise<void>;
+  /** Retire le bulletin d'une œuvre (retrait de la ligne). */
+  effacerBulletin: (cle: string) => Promise<void>;
+  /**
+   * Enregistre les empreintes locales des fichiers retenus pour chaque pièce
+   * (contrôle anti-doublon du selfie, règle 5). Carte entièrement remplacée.
+   */
+  definirEmpreintesPieces: (empreintes: Record<string, string>) => Promise<void>;
   definirIdentifiantsDossier: (numeroDossier: string, codeSuivi: string) => Promise<void>;
+  /** Enregistre un selfie valide + la signature du dossier au moment de la prise. */
+  definirSelfie: (selfie: PieceEntree, signature: string) => Promise<void>;
+  /** Retire le selfie (reprise après invalidation ou suppression). */
+  effacerSelfie: () => Promise<void>;
   reinitialiserBrouillon: () => Promise<void>;
   age: number | null;
   estMineur15A17: boolean;
@@ -189,6 +231,12 @@ export function AdhesionDraftProvider({ children }: { children: ReactNode }) {
               ...precedent.engagement,
               ...(parse.engagement ?? {}),
             },
+            // Rétro-compat (29C) : d'anciens brouillons n'ont pas ces champs.
+            bulletins: parse.bulletins ?? precedent.bulletins,
+            empreintes_pieces: parse.empreintes_pieces ?? precedent.empreintes_pieces,
+            selfie: parse.selfie ?? precedent.selfie,
+            empreinte_dossier_au_selfie:
+              parse.empreinte_dossier_au_selfie ?? precedent.empreinte_dossier_au_selfie,
           }));
         }
       } catch (erreur) {
@@ -294,6 +342,25 @@ export function AdhesionDraftProvider({ children }: { children: ReactNode }) {
     [persister],
   );
 
+  const definirEmpreintesPieces = useCallback(
+    async (empreintes: Record<string, string>) => {
+      setBrouillon((precedent) => {
+        // Comparaison JSON : aucune écriture inutile si la carte est identique.
+        if (JSON.stringify(precedent.empreintes_pieces) === JSON.stringify(empreintes)) {
+          return precedent;
+        }
+        const maj: AdhesionDraft = {
+          ...precedent,
+          empreintes_pieces: empreintes,
+          derniere_mise_a_jour: new Date().toISOString(),
+        };
+        void persister(maj);
+        return maj;
+      });
+    },
+    [persister],
+  );
+
   const definirIdentifiantsDossier = useCallback(
     async (numeroDossier: string, codeSuivi: string) => {
       setBrouillon((precedent) => {
@@ -309,6 +376,67 @@ export function AdhesionDraftProvider({ children }: { children: ReactNode }) {
     },
     [persister],
   );
+
+  const definirBulletin = useCallback(
+    async (cle: string, bulletin: BulletinDeclaration) => {
+      setBrouillon((precedent) => {
+        const maj: AdhesionDraft = {
+          ...precedent,
+          bulletins: { ...precedent.bulletins, [cle]: bulletin },
+          derniere_mise_a_jour: new Date().toISOString(),
+        };
+        void persister(maj);
+        return maj;
+      });
+    },
+    [persister],
+  );
+
+  const effacerBulletin = useCallback(
+    async (cle: string) => {
+      setBrouillon((precedent) => {
+        const restants = { ...precedent.bulletins };
+        delete restants[cle];
+        const maj: AdhesionDraft = {
+          ...precedent,
+          bulletins: restants,
+          derniere_mise_a_jour: new Date().toISOString(),
+        };
+        void persister(maj);
+        return maj;
+      });
+    },
+    [persister],
+  );
+
+  const definirSelfie = useCallback(
+    async (selfie: PieceEntree, signature: string) => {
+      setBrouillon((precedent) => {
+        const maj: AdhesionDraft = {
+          ...precedent,
+          selfie,
+          empreinte_dossier_au_selfie: signature,
+          derniere_mise_a_jour: new Date().toISOString(),
+        };
+        void persister(maj);
+        return maj;
+      });
+    },
+    [persister],
+  );
+
+  const effacerSelfie = useCallback(async () => {
+    setBrouillon((precedent) => {
+      const maj: AdhesionDraft = {
+        ...precedent,
+        selfie: null,
+        empreinte_dossier_au_selfie: null,
+        derniere_mise_a_jour: new Date().toISOString(),
+      };
+      void persister(maj);
+      return maj;
+    });
+  }, [persister]);
 
   const reinitialiserBrouillon = useCallback(async () => {
     const nouveau: AdhesionDraft = {
@@ -361,7 +489,12 @@ export function AdhesionDraftProvider({ children }: { children: ReactNode }) {
       definirCategorie,
       mettreAJourPieces,
       mettreAJourOeuvres,
+      definirBulletin,
+      effacerBulletin,
+      definirEmpreintesPieces,
       definirIdentifiantsDossier,
+      definirSelfie,
+      effacerSelfie,
       reinitialiserBrouillon,
       age,
       estMineur15A17,
@@ -377,6 +510,11 @@ export function AdhesionDraftProvider({ children }: { children: ReactNode }) {
       estMineur15A17,
       estMoinsDe15Ans,
       identiteEstValide,
+      definirSelfie,
+      effacerSelfie,
+      definirBulletin,
+      effacerBulletin,
+      definirEmpreintesPieces,
       mettreAJourIdentite,
       mettreAJourEngagement,
       mettreAJourOeuvres,

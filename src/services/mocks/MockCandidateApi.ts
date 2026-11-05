@@ -241,8 +241,20 @@ export class MockCandidateApi implements CandidateApi {
       );
     }
 
+    // Règle 5 (ÉTAPE 29C) : le selfie de vérification d'identité est la
+    // dernière pièce et conditionne l'envoi. Contrôle revalidé côté « serveur »
+    // (le bouton est déjà verrouillé à l'écran, mais le serveur ne fait jamais
+    // confiance au seul client).
+    if (!entree.selfie) {
+      return erreurMetier(
+        CODES_ERREUR_CANDIDAT.SELFIE_REQUIS,
+        "Le selfie de vérification d'identité est requis avant l'envoi de la demande.",
+      );
+    }
+
     const dateSoumission = maintenantISO();
     dossier.pieces = entree.pieces.map((piece) => ({ ...piece }));
+    dossier.selfie = { ...entree.selfie };
     dossier.oeuvres = entree.oeuvres.map((oeuvre) => ({
       ...oeuvre,
       attestations: [...oeuvre.attestations],

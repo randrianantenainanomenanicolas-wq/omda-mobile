@@ -16,14 +16,20 @@ import {
 import {
   COMPRESSION_JPEG_NORMALISEE,
   DIMENSION_MAX_PX,
+  MESSAGE_SELFI_DOUBLON,
+  MESSAGE_SELFI_TROP_PETIT,
   QUALITE_COMPRESSION_JPEG,
   avecReprise,
   compresserSiImage,
+  controleLisibiliteSelfie,
+  empreinteDejaPrise,
+  empreinteFichier,
   estErreurReprebable,
   estImageCompressible,
   estSansTraitement,
   natureDepuisPiece,
   renommerFichier,
+  signatureDossier,
   validerDocumentsParCategorie,
   validerTaillePreparee,
 } from '../src/utils';
@@ -131,6 +137,7 @@ async function principal(): Promise<void> {
   await scenarioPannes();
   await scenarioMembre();
   await scenarioTraitementFichiers();
+  await scenarioVerifIdentite();
 
   console.log(
     echecs === 0 ? 'TOUS LES CONTROLES SONT PASSES' : `${echecs} controle(s) en echec`,
@@ -324,6 +331,13 @@ async function scenarioSuivi(): Promise<void> {
           },
         ],
         oeuvres: [oeuvreTest('varangue'), oeuvreTest('riziere')],
+        // ÉTAPE 29C : le selfie de vérification d'identité conditionne l'envoi.
+        selfie: {
+          type: 'SELFIE_CIN',
+          chemin_stockage: 'pieces/selfie.jpg',
+          mime_type: 'image/jpeg',
+          taille_octets: 300000,
+        },
       })
     : null;
   verifier(
@@ -1582,6 +1596,113 @@ async function scenarioTraitementFichiers(): Promise<void> {
     envoiRepris.ok ? 'ok' : JSON.stringify(envoiRepris.erreur),
   );
   forcerEchecsTeleversement(0);
+}
+
+/**
+ * ÉTAPE 29C — vérification d'identité par selfie (dernière étape).
+ * Couvre les 4 cas demandés :
+ * 1. envoi SANS selfie -> refus « serveur » SELFIE_REQUIS (puis accepté une
+ *    fois le selfie ajouté) ;
+ * 2. selfie TROP PETIT -> contrôle local de lisibilité ;
+ * 3. selfie IDENTIQUE à la CIN -> détection de doublon par empreinte ;
+ * 4. MODIFICATION APRÈS SELFIE -> la signature du dossier change, le selfie
+ *    doit être refait (bouton verrouillé à nouveau).
+ * Aucun contrôle ici ne fait de reconnaissance faciale : on ne compare aucun
+ * visage, on vérifie seulement la présence/validité du fichier selfie.
+ */
+async function scenarioVerifIdentite(): Promise<void> {
+  const piecesCompletes = [
+    { type: 'PHOTO' as const, chemin_stockage: 'pieces/photo.jpg', mime_type: 'image/jpeg' as const, taille_octets: 120000 },
+    { type: 'CIN' as const, chemin_stockage: 'pieces/cin.pdf', mime_type: 'application/pdf' as const, taille_octets: 240000 },
+    { type: 'ACTE_NAISSANCE' as const, chemin_stockage: 'pieces/acte.pdf', mime_type: 'application/pdf' as const, taille_octets: 180000 },
+    { type: 'CERTIFICAT_RESIDENCE' as const, chemin_stockage: 'pieces/residence.pdf', mime_type: 'application/pdf' as const, taille_octets: 150000 },
+  ];
+
+  /* 1. Sans selfie : le « serveur » refuse l'envoi, puis l'accepte avec selfie. */
+  const brouillonSelfie = await mockCandidateApi.creerDemande({
+    identite: {
+      nom: 'SELFIE',
+      prenom: 'Test',
+      date_naissance: '1994-03-03',
+      cin: '101940000003',
+      telephone: '+261340000003',
+      email: 'selfie@example.mg',
+      adresse: 'Lot 3',
+    },
+    categorie_id: '11111111-1111-4111-8111-111111111111',
+  });
+
+  const sansSelfie = brouillonSelfie.ok
+    ? await mockCandidateApi.soumettreDemande({
+        numero_dossier: brouillonSelfie.valeur.numero_dossier,
+        code_suivi: brouillonSelfie.valeur.code_suivi,
+        categorie_id: '11111111-1111-4111-8111-111111111111',
+        pieces: piecesCompletes,
+        oeuvres: [oeuvreTest('varangue'), oeuvreTest('riziere')],
+      })
+    : null;
+  verifier(
+    'sans selfie -> SELFIE_REQUIS (refus côté « serveur », bouton verrouillé à l’écran)',
+    sansSelfie !== null &&
+      !sansSelfie.ok &&
+      sansSelfie.erreur.type === 'metier' &&
+      sansSelfie.erreur.code === 'SELFIE_REQUIS',
+    sansSelfie && !sansSelfie.ok ? JSON.stringify(sansSelfie.erreur) : 'ok inattendu',
+  );
+
+  const avecSelfie = brouillonSelfie.ok
+    ? await mockCandidateApi.soumettreDemande({
+        numero_dossier: brouillonSelfie.valeur.numero_dossier,
+        code_suivi: brouillonSelfie.valeur.code_suivi,
+        categorie_id: '11111111-1111-4111-8111-111111111111',
+        pieces: piecesCompletes,
+        oeuvres: [oeuvreTest('varangue'), oeuvreTest('riziere')],
+        selfie: {
+          type: 'SELFIE_CIN',
+          chemin_stockage: 'pieces/selfie.jpg',
+          mime_type: 'image/jpeg',
+          taille_octets: 300000,
+        },
+      })
+    : null;
+  verifier(
+    'selfie ajouté -> envoi accepté (ENVOYEE)',
+    avecSelfie !== null && avecSelfie.ok && avecSelfie.valeur.statut === 'ENVOYEE',
+  );
+
+  /* 2. Selfie trop petit pour être lisible (contrôle local de lisibilité). */
+  verifier(
+    'lisibilité : selfie sous le seuil (400×300) refusé, image suffisante (1024×768) acceptée',
+    controleLisibiliteSelfie({ largeur: 400, hauteur: 300 }) === MESSAGE_SELFI_TROP_PETIT &&
+      controleLisibiliteSelfie({ largeur: 1024, hauteur: 768 }) === null,
+  );
+
+  /* 3. Selfie identique à la CIN : doublon détecté par empreinte (uri + taille). */
+  const empreinteCin = empreinteFichier({ uri: 'file:///tmp/cin.jpg', taille_octets: 250000 });
+  const empreinteSelfieDoublon = empreinteFichier({ uri: 'file:///tmp/cin.jpg', taille_octets: 250000 });
+  const empreinteSelfieDistinct = empreinteFichier({ uri: 'file:///tmp/selfie.jpg', taille_octets: 310000 });
+  verifier(
+    'empreinte : selfie reprenant exactement le fichier de la CIN = doublon (MESSAGE_SELFI_DOUBLON)',
+    MESSAGE_SELFI_DOUBLON.length > 0 &&
+      empreinteDejaPrise(empreinteSelfieDoublon, [empreinteCin]) &&
+      !empreinteDejaPrise(empreinteSelfieDistinct, [empreinteCin]),
+  );
+
+  /* 4. Modification après selfie : la signature du dossier change -> selfie à refaire. */
+  const signatureAvant = signatureDossier(['RAKOTO', 'Jean', 'pieces/cin.pdf', 'varangue.mp3']);
+  const signatureIdentique = signatureDossier(['RAKOTO', 'Jean', 'pieces/cin.pdf', 'varangue.mp3']);
+  const signatureApresModification = signatureDossier([
+    'RAKOTO',
+    'Jean',
+    'pieces/cin.pdf',
+    'varangue.mp3',
+    'pieces/acte-modifie.pdf',
+  ]);
+  verifier(
+    'signature du dossier : stable si rien ne change, différente après modification d’une pièce (le selfie doit être refait)',
+    signatureIdentique === signatureAvant && signatureApresModification !== signatureAvant,
+    `avant=${signatureAvant} apres=${signatureApresModification}`,
+  );
 }
 
 principal().catch((erreur) => {

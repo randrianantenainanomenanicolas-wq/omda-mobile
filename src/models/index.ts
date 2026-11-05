@@ -6,3 +6,5 @@ export * from './adhesion';
 export * from './oeuvres';
 export * from './paiements';
 export * from './notifications';
+export * from './importation';
+export * from './bulletins';

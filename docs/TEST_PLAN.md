@@ -225,7 +225,30 @@ Les fonctions ci-dessous se déclenchent depuis le code (appelées dans `tools/v
 
 > **Limites retenues (à valider)** : taille max **20 Mo** par fichier, identique côté app (`TAILLE_MAX_FICHIER_OCTETS`), côté schéma (`CHECK … <= 20971520`) et côté Storage (`file_size_limit = 20971520` pour `pieces` et `oeuvres`). MP3 : un fichier de 20 Mo correspond à ≈ 14 min en 192 kbps — encodage **≤ 192 kbps** recommandé pour tenir sans migration. Réglages bucket : privés, `allowed_mime_types` = {`pieces`: jpeg/png/pdf} et {`oeuvres`: mpeg/wav/pdf/jpeg/png}, alignés sur `TYPES_MIME_AUTORISES`.
 
-## 13) Récapitulatif de campagne de tests
+## 13) Vérification d'identité par selfie (29C)
+
+**Prérequis** : dossier arrivé à l'étape 6 (`verif-identite`) après un récapitulatif complet ; mode mock par défaut. Les cas **[RÉEL]** supposent un appareil (caméra + galerie) via Expo Go ou une build de prévisualisation.
+**Rappel** : AUCUNE reconnaissance faciale n'est effectuée — l'app ne compare aucun visage ; le selfie est simplement stocké puis examiné par un agent OMDA au back-office. Aucun paiement à ce stade.
+
+| # | Étapes | Résultat attendu |
+| --- | --- | --- |
+| 13.1 | Ouvrir « Vérification d'identité » alors qu'il **manque** une pièce ou un formulaire | Écran **VERROUILLÉ** : bannière + liste PRÉCISE des manquants, chaque ligne étant un lien vers l'écran correspondant (identité, catégorie, documents, bulletin d'une œuvre) ; bouton « Envoyer ma demande » inactif |
+| 13.2 | Compléter tous les formulaires et importer toutes les pièces, puis revenir | Liste des manquants vide, section « complet » affichée, consigne avant la photo visible, bouton déverrouillé une fois le selfie importé |
+| 13.3 | Vérifier l'**ordre d'importation** dans l'écran Documents | Blocs « par œuvre » (fichier, attestation, bulletin à compléter/complété + accès au formulaire) **puis** photo, CIN, acte de naissance, certificat de résidence — types et ordre issus de la config unique `models/importation.ts` (rien de codé en dur dans l'UI) |
+| 13.4 | Consulter l'état de chaque section | États distincts affichés : manquant / envoi en cours / importé / erreur avec reprise |
+| 13.5 | Remplir le **bulletin** d'une œuvre (générique) | Formulaire accessible depuis le bloc œuvre ; état passe de « à compléter » à « complété » ; compte dans la complétude du dossier |
+| 13.6 **[RÉEL]** | Demander le selfie **à la caméra** | Permission sollicitée **au moment de la prise** (pas à l'ouverture) ; consigne « tenez votre CIN, visage et carte nets » affichée **avant** la capture |
+| 13.7 | Refuser la permission caméra | Message clair expliquant le refus et la marche à suivre (importer depuis la galerie ou réactiver la permission) ; l'app ne plante pas |
+| 13.8 | Importer une image depuis la **galerie** | Image acceptée après les mêmes contrôles locaux que la caméra ; traitement 29B appliqué (compression/renommage `Selfie avec CIN …`) |
+| 13.9 | Choisir une **image trop petite** pour être lisible (< seuil) | Refus local : `MESSAGE_SELFI_TROP_PETIT` ; la tuile repasse en erreur, aucune perte du reste du dossier |
+| 13.10 | Choisir le **même fichier** que celui d'une autre pièce (ex. la CIN) | Détection **doublon par empreinte** (uri + taille) : `MESSAGE_SELFI_DOUBLON` ; selfie refusé, reprise possible |
+| 13.11 | Prendre un selfie valide puis **modifier** un formulaire ou une pièce | Le selfie est **invaldé** (la signature du dossier a changé), bouton « Envoyer » redevient **inactif**, consigne de refaire le selfie affichée ; les autres pièces restent importées |
+| 13.12 | retenter un selfie après un **échec d'envoi** (mock : panne réseau forcée) | 4 états respectés ; « Réessayer » relance l'envoi **sans perdre** le selfie ni le reste du dossier |
+| 13.13 | Tenter « Envoyer ma demande » **sans selfie** (bouton forcé côté serveur, mock `SELFIE_REQUIS`) | Le « serveur » refuse : `SELFIE_REQUIS` ; message explicite, aucun dossier envoyé |
+| 13.14 | Envoyer **après** un selfie importé avec succès | Dossier `ENVOYEE`, passage à l'étape 7 (Confirmation) avec numéro de dossier + code de suivi ; délai indicatif 72 h, aucun paiement |
+| 13.15 | Vérifier le **texte de l'écran** | Une mention indique explicitement qu'il n'y a **pas de reconnaissance faciale** et que l'agent OMDA examine la photo au back-office |
+
+## 14) Récapitulatif de campagne de tests
 
 | Bloc | Scénarios | Statut |
 | --- | --- | --- |
@@ -241,6 +264,7 @@ Les fonctions ci-dessous se déclenchent depuis le code (appelées dans `tools/v
 | §10 Panne / simulations | 6 cas | ☐ |
 | §11 Nouvelles règles étape 28 | 11 cas | ☐ |
 | §12 Traitement des fichiers (29B) | 18 cas | ☐ |
+| §13 Vérification d'identité par selfie (29C) | 15 cas | ☐ |
 
 **Critères de sortie d'une campagne** : tous les scénarios ci-dessus au vert, `npx tsc --noEmit` sans erreur, `npx --yes tsx tools/verif-mocks.ts` → « TOUS LES CONTROLES SONT PASSES ». Toute anomalie est consignée avec son numéro de scénario dans le rapport de recette.
 

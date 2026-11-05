@@ -1,4 +1,5 @@
 import type {
+  BulletinDeclaration,
   CodeDevise,
   DateISO,
   HorodatageISO,
@@ -60,6 +61,18 @@ export type OeuvreAdhesionEntree = {
   annee?: number | null;
   fichier: FichierDepose;
   attestations: FichierDepose[];
+  /**
+   * Bulletin de déclaration rempli dans l'app (ÉTAPE 29C, règle 11).
+   * Obligatoire côté écran avant déblocage de la vérification d'identité ;
+   * typé `| null` pour rester compatible avec d'anciens brouillons.
+   */
+  bulletin?: BulletinDeclaration | null;
+  /**
+   * Clé locale stable de la ligne d'œuvre (ÉTAPE 29C) : sert à retrouver le
+   * bulletin saisi dans le brouillon (`draft.bulletins[cle_locale]`). Ignorée
+   * par le serveur.
+   */
+  cle_locale?: string;
 };
 
 export type CreerDemandeEntree = {
@@ -89,6 +102,12 @@ export type SoumettreDemandeEntree = {
   categorie_id: UUID;
   pieces: PieceEntree[];
   oeuvres: OeuvreAdhesionEntree[];
+  /**
+   * Selfie de vérification d'identité (dernière pièce, règle 5).
+   * `null`/absent = le serveur refuse l'envoi (`SELFIE_REQUIS`) : le contrôle
+   * est fait à la fois à l'écran (bouton verrouillé) et côté « serveur ».
+   */
+  selfie?: PieceEntree | null;
 };
 
 /** Écran L : informations à conserver par le candidat. */
@@ -236,6 +255,8 @@ export const CODES_ERREUR_CANDIDAT = {
   PAIEMENT_DEJA_REUSSI: 'PAIEMENT_DEJA_REUSSI',
   FICHIER_TROP_VOLUMINEUX: 'FICHIER_TROP_VOLUMINEUX',
   TYPE_FICHIER_NON_AUTORISE: 'TYPE_FICHIER_NON_AUTORISE',
+  /** Selfie de vérification d'identité manquant au moment de l'envoi (règle 5). */
+  SELFIE_REQUIS: 'SELFIE_REQUIS',
 } as const;
 
 export type CodeErreurCandidat =
